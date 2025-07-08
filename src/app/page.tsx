@@ -1,79 +1,108 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import yahooFinance from 'yahoo-finance2';
+import { createChart, Time } from 'lightweight-charts';
 
-type StockData = {
-  date: string;
-  close: number;
+type Candle = {
+  time: Time;
   open: number;
   high: number;
   low: number;
-  volume: number;
-  adjClose?: number;
+  close: number;
 };
 
 export default function Home() {
-  const [symbol, setSymbol] = useState<string>("");
-  const [prices, setPrices] = useState<StockData[]>([]);
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const [symbol, setSymbol] = useState('');
+  const [candles, setCandles] = useState<Candle[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
-      const res = await fetch(`/api/stock?symbol=${symbol}`);
-      const result = await res.json();
+      const result = await yahooFinance.historical(symbol, {
+        period1: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        period2: new Date(),
+      });
 
-      if (result.error) {
-        setError(result.error);
-        setPrices([]);
-        return;
-      }
+      const candleData: Candle[] = result.reverse().map((d) => ({
+        time: d.date.toISOString().split('T')[0] as Time,
+        open: d.open,
+        high: d.high,
+        low: d.low,
+        close: d.close,
+      }));
 
-      setPrices(result.reverse());
+      setCandles(candleData);
       setError(null);
-    } catch {
-      setError("Error fetching stock data.");
-      setPrices([]);
+    } catch (err) {
+      setError('Invalid stock symbol or API error.');
+      setCandles([]);
     }
   };
 
+  useEffect(() => {
+    if (!chartContainerRef.current || candles.length === 0) return;
+
+    chartContainerRef.current.innerHTML = '';
+
+    const chart = createChart(chartContainerRef.current, {
+      width: chartContainerRef.current.clientWidth,
+      height: 400,
+      layout: { background: { color: '#ffffff' }, textColor: '#000' },
+      grid: {
+        vertLines: { color: '#eee' },
+        horzLines: { color: '#eee' },
+      },
+    });
+
+    const series = (chart as any).addCandlestickSeries();
+    series.setData(candles);
+
+    const resizeObserver = new ResizeObserver(() => {
+      chart.applyOptions({ width: chartContainerRef.current!.clientWidth });
+    });
+    resizeObserver.observe(chartContainerRef.current);
+
+    return () => resizeObserver.disconnect();
+  }, [candles]);
+
   return (
-    <div style={{ padding: 40, fontFamily: "Arial" }}>
-      <h1>📈 Stock Price Lookup</h1>
-      <input
-        type="text"
-        placeholder="Enter stock symbol (e.g. AAPL)"
-        value={symbol}
-        onChange={(e) => setSymbol(e.target.value)}
-        style={{ padding: 8, width: 250, marginRight: 10 }}
-      />
-      <button onClick={fetchData} style={{ padding: "8px 16px" }}>
-        Search
-      </button>
+    <div style={{ padding: 40, fontFamily: 'Arial', maxWidth: 900, margin: 'auto' }}>
+      <h1 style={{ fontSize: '2rem', marginBottom: 20 }}>📊 Stock Candlestick Chart</h1>
 
-      {error && <p style={{ color: "red" }}>{error}</p>}
+      <div style={{ display: 'flex', marginBottom: 20 }}>
+        <input
+          type="text"
+          placeholder="Enter symbol (e.g. AAPL)"
+          value={symbol}
+          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+          style={{
+            padding: 10,
+            width: 300,
+            marginRight: 10,
+            border: '1px solid #ccc',
+            borderRadius: 5,
+          }}
+        />
+        <button
+          onClick={fetchData}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: '#0070f3',
+            color: 'white',
+            border: 'none',
+            borderRadius: 5,
+            cursor: 'pointer',
+          }}
+        >
+          Search
+        </button>
+      </div>
 
-      {prices.length > 0 && (
-        <table style={{ marginTop: 20, borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              <th style={{ border: "1px solid black", padding: 5 }}>Date</th>
-              <th style={{ border: "1px solid black", padding: 5 }}>Close</th>
-            </tr>
-          </thead>
-          <tbody>
-            {prices.map((item) => (
-              <tr key={item.date}>
-                <td style={{ border: "1px solid black", padding: 5 }}>
-                  {new Date(item.date).toLocaleDateString()}
-                </td>
-                <td style={{ border: "1px solid black", padding: 5 }}>
-                  {item.close.toFixed(2)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+
+      <div ref={chartContainerRef} />
     </div>
   );
 }
