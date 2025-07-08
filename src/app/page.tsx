@@ -21,7 +21,7 @@ export default function Home() {
   const fetchData = async () => {
     try {
       const result = await yahooFinance.historical(symbol, {
-        period1: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        period1: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
         period2: new Date(),
       });
 
@@ -35,7 +35,7 @@ export default function Home() {
 
       setCandles(candleData);
       setError(null);
-    } catch (err) {
+    } catch {
       setError('Invalid stock symbol or API error.');
       setCandles([]);
     }
@@ -56,7 +56,7 @@ export default function Home() {
       },
     });
 
-    const series = (chart as any).addCandlestickSeries();
+    const series = chart.addCandlestickSeries();
     series.setData(candles);
 
     const resizeObserver = new ResizeObserver(() => {
