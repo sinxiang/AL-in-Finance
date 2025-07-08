@@ -19,12 +19,22 @@ export default function Home() {
 
   const fetchData = async () => {
     try {
-      const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1mo&interval=1d`);
+      const response = await fetch(
+        `https://apidojo-yahoo-finance-v1.p.rapidapi.com/stock/v2/get-chart?interval=1d&symbol=${symbol}&range=1mo&region=US`,
+        {
+          method: 'GET',
+          headers: {
+            'X-RapidAPI-Key': '7f86051324mshf01077615510e7dp1ac9e4jsn2c4e365931d7',
+            'X-RapidAPI-Host': 'apidojo-yahoo-finance-v1.p.rapidapi.com',
+          },
+        }
+      );
+
       const data = await response.json();
 
-      if (!data.chart?.result) throw new Error('Invalid symbol');
+      const result = data.chart?.result?.[0];
+      if (!result) throw new Error('Invalid symbol');
 
-      const result = data.chart.result[0];
       const timestamps = result.timestamp;
       const quotes = result.indicators.quote[0];
 
@@ -39,11 +49,11 @@ export default function Home() {
       setCandles(candleData);
       setError(null);
     } catch (err) {
+      console.error(err);
       setError('Invalid stock symbol or API error.');
       setCandles([]);
     }
   };
-  
 
   useEffect(() => {
     if (!chartContainerRef.current || candles.length === 0) return;
