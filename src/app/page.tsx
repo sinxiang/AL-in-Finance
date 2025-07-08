@@ -1,11 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-
-import yahooFinance from "yahoo-finance2";
+import React, { useState } from 'react';
 
 type StockData = {
-  date: Date;
+  date: string;
   close: number;
   open: number;
   high: number;
@@ -21,16 +19,19 @@ export default function Home() {
 
   const fetchData = async () => {
     try {
-      const result = await yahooFinance.historical(symbol, {
-        period1: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-        period2: new Date(),
-      });
+      const res = await fetch(`/api/stock?symbol=${symbol}`);
+      const result = await res.json();
 
-      // 类型断言成 StockData[]
-      setPrices((result as StockData[]).reverse());
+      if (result.error) {
+        setError(result.error);
+        setPrices([]);
+        return;
+      }
+
+      setPrices(result.reverse());
       setError(null);
     } catch (err) {
-      setError("Invalid stock symbol or API error.");
+      setError("Error fetching stock data.");
       setPrices([]);
     }
   };
@@ -61,7 +62,7 @@ export default function Home() {
           </thead>
           <tbody>
             {prices.map((item) => (
-              <tr key={item.date.toString()}>
+              <tr key={item.date}>
                 <td style={{ border: "1px solid black", padding: 5 }}>
                   {new Date(item.date).toLocaleDateString()}
                 </td>
