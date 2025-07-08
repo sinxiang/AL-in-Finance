@@ -30,7 +30,7 @@ export default function Home() {
 
       setPrices(result.reverse());
       setError(null);
-    } catch (err) {
+    } catch {
       setError("Error fetching stock data.");
       setPrices([]);
     }

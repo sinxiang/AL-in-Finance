@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json(result);
-  } catch (err) {
+  } catch {
     return NextResponse.json({ error: "Invalid symbol or API error" }, { status: 500 });
   }
 }
