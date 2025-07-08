@@ -1,123 +1,80 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { createChart, Time } from 'lightweight-charts';
+import React, { useState, useEffect } from 'react';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip } from 'chart.js';
+import { Chart } from 'react-chartjs-2';
 
-type Candle = {
-  time: Time;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-};
+ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip);
 
-export default function Home() {
-  const chartContainerRef = useRef<HTMLDivElement>(null);
+export default function HomePage() {
   const [symbol, setSymbol] = useState('');
-  const [candles, setCandles] = useState<Candle[]>([]);
+  const [candles, setCandles] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const fetchData = async () => {
+    setError(null);
     try {
-      const response = await fetch(
-        `https://apidojo-yahoo-finance-v1.p.rapidapi.com/stock/v2/get-chart?interval=1d&symbol=${symbol}&range=1mo&region=US`,
-        {
-          method: 'GET',
-          headers: {
-            'X-RapidAPI-Key': '7f86051324mshf01077615510e7dp1ac9e4jsn2c4e365931d7',
-            'X-RapidAPI-Host': 'apidojo-yahoo-finance-v1.p.rapidapi.com',
-          },
-        }
-      );
+      const res = await fetch(`/api/stock?symbol=${symbol}`);
+      const raw = await res.json();
 
-      const data = await response.json();
+      if (!Array.isArray(raw)) {
+        setError('Invalid data format from API');
+        return;
+      }
 
-      const result = data.chart?.result?.[0];
-      if (!result) throw new Error('Invalid symbol');
-
-      const timestamps = result.timestamp;
-      const quotes = result.indicators.quote[0];
-
-      const candleData: Candle[] = timestamps.map((t: number, i: number) => ({
-        time: new Date(t * 1000).toISOString().split('T')[0] as Time,
-        open: quotes.open[i],
-        high: quotes.high[i],
-        low: quotes.low[i],
-        close: quotes.close[i],
+      const cleaned = raw.map((d: any) => ({
+        date: d.date.split('T')[0],
+        open: d.open,
+        close: d.close,
+        high: d.high,
+        low: d.low,
       }));
 
-      setCandles(candleData);
-      setError(null);
+      setCandles(cleaned);
     } catch (err) {
-      console.error(err);
-      setError('Invalid stock symbol or API error.');
-      setCandles([]);
+      setError('Failed to fetch data.');
     }
   };
 
-  useEffect(() => {
-    if (!chartContainerRef.current || candles.length === 0) return;
-
-    chartContainerRef.current.innerHTML = '';
-
-    const chart = createChart(chartContainerRef.current, {
-      width: chartContainerRef.current.clientWidth,
-      height: 400,
-      layout: { background: { color: '#ffffff' }, textColor: '#000' },
-      grid: {
-        vertLines: { color: '#eee' },
-        horzLines: { color: '#eee' },
+  const chartData = {
+    labels: candles.map((d) => d.date),
+    datasets: [
+      {
+        label: 'Open',
+        data: candles.map((d) => d.open),
+        backgroundColor: 'blue',
       },
-    });
-
-    const series = (chart as any).addCandlestickSeries();
-
-    series.setData(candles);
-
-    const resizeObserver = new ResizeObserver(() => {
-      chart.applyOptions({ width: chartContainerRef.current!.clientWidth });
-    });
-    resizeObserver.observe(chartContainerRef.current);
-
-    return () => resizeObserver.disconnect();
-  }, [candles]);
+      {
+        label: 'Close',
+        data: candles.map((d) => d.close),
+        backgroundColor: 'green',
+      },
+    ],
+  };
 
   return (
-    <div style={{ padding: 40, fontFamily: 'Arial', maxWidth: 900, margin: 'auto' }}>
-      <h1 style={{ fontSize: '2rem', marginBottom: 20 }}>📊 Stock Candlestick Chart</h1>
+    <main className="p-6 max-w-4xl mx-auto">
+      <h1 className="text-2xl font-bold mb-4">📊 Simple Stock Chart</h1>
 
-      <div style={{ display: 'flex', marginBottom: 20 }}>
+      <div className="flex gap-2 mb-4">
         <input
-          type="text"
-          placeholder="Enter symbol (e.g. AAPL)"
+          className="border px-2 py-1"
           value={symbol}
           onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-          style={{
-            padding: 10,
-            width: 300,
-            marginRight: 10,
-            border: '1px solid #ccc',
-            borderRadius: 5,
-          }}
+          placeholder="Enter symbol (e.g. AAPL)"
         />
-        <button
-          onClick={fetchData}
-          style={{
-            padding: '10px 20px',
-            backgroundColor: '#0070f3',
-            color: 'white',
-            border: 'none',
-            borderRadius: 5,
-            cursor: 'pointer',
-          }}
-        >
-          Search
+        <button className="bg-blue-600 text-white px-4 py-1 rounded" onClick={fetchData}>
+          Fetch
         </button>
       </div>
 
-      {error && <p style={{ color: 'red' }}>{error}</p>}
+      {error && <p className="text-red-500">{error}</p>}
 
-      <div ref={chartContainerRef} />
-    </div>
+      {candles.length > 0 && (
+        <div className="bg-white p-4 rounded shadow">
+          <Chart type="bar" data={chartData} />
+        </div>
+      )}
+    </main>
   );
 }
