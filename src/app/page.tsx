@@ -56,7 +56,8 @@ export default function Home() {
       },
     });
 
-    const series = chart.addCandlestickSeries();
+    const series = (chart as any).addCandlestickSeries();
+
     series.setData(candles);
 
     const resizeObserver = new ResizeObserver(() => {
