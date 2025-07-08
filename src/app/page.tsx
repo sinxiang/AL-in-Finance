@@ -1,79 +1,104 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip } from 'chart.js';
-import { Chart } from 'react-chartjs-2';
+import React, { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+import axios from "axios";
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip);
+// 动态加载 ApexCharts（避免 SSR 报错）
+const ApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
 
-export default function HomePage() {
-  const [symbol, setSymbol] = useState('');
-  const [candles, setCandles] = useState<any[]>([]);
-  const [error, setError] = useState<string | null>(null);
+export default function Home() {
+  const [symbol, setSymbol] = useState("AAPL");
+  const [input, setInput] = useState("AAPL");
+  const [series, setSeries] = useState<any[]>([]);
+  const [options, setOptions] = useState<any>({
+    chart: {
+      type: "candlestick",
+      height: 350,
+    },
+    title: {
+      text: "Stock Candlestick Chart",
+      align: "left",
+    },
+    xaxis: {
+      type: "datetime",
+    },
+    yaxis: {
+      tooltip: {
+        enabled: true,
+      },
+    },
+  });
 
-  const fetchData = async () => {
-    setError(null);
+  const fetchData = async (ticker: string) => {
     try {
-      const res = await fetch(`/api/stock?symbol=${symbol}`);
-      const raw = await res.json();
+      const res = await axios.get(`/api/stock?symbol=${ticker}`);
+      const result = res.data.chart.result?.[0];
 
-      if (!Array.isArray(raw)) {
-        setError('Invalid data format from API');
-        return;
-      }
+      if (!result) throw new Error("No data returned");
 
-      const cleaned = raw.map((d: any) => ({
-        date: d.date.split('T')[0],
-        open: d.open,
-        close: d.close,
-        high: d.high,
-        low: d.low,
+      const timestamps = result.timestamp;
+      const ohlc = result.indicators.quote[0];
+
+      const formattedData = timestamps.map((t: number, i: number) => ({
+        x: new Date(t * 1000),
+        y: [
+          ohlc.open[i],
+          ohlc.high[i],
+          ohlc.low[i],
+          ohlc.close[i],
+        ].map((v) => parseFloat(v.toFixed(2))),
       }));
 
-      setCandles(cleaned);
+      setSeries([{ data: formattedData }]);
+      setOptions((prev: any) => ({
+        ...prev,
+        title: { text: `${ticker.toUpperCase()} Stock Candlestick Chart` },
+      }));
     } catch (err) {
-      setError('Failed to fetch data.');
+      console.error("Failed to fetch data:", err);
+      setSeries([]);
     }
   };
 
-  const chartData = {
-    labels: candles.map((d) => d.date),
-    datasets: [
-      {
-        label: 'Open',
-        data: candles.map((d) => d.open),
-        backgroundColor: 'blue',
-      },
-      {
-        label: 'Close',
-        data: candles.map((d) => d.close),
-        backgroundColor: 'green',
-      },
-    ],
-  };
+  useEffect(() => {
+    fetchData(symbol);
+  }, [symbol]);
 
   return (
-    <main className="p-6 max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">📊 Simple Stock Chart</h1>
+    <main className="p-6">
+      <h1 className="text-2xl font-bold mb-4">Stock Candle Chart Viewer</h1>
 
-      <div className="flex gap-2 mb-4">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          setSymbol(input.trim().toUpperCase());
+        }}
+        className="flex gap-2 mb-6"
+      >
         <input
-          className="border px-2 py-1"
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-          placeholder="Enter symbol (e.g. AAPL)"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          className="border px-4 py-2 rounded w-40"
+          placeholder="Enter stock symbol"
         />
-        <button className="bg-blue-600 text-white px-4 py-1 rounded" onClick={fetchData}>
-          Fetch
+        <button
+          type="submit"
+          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+        >
+          Search
         </button>
-      </div>
+      </form>
 
-      {error && <p className="text-red-500">{error}</p>}
-
-      {candles.length > 0 && (
-        <div className="bg-white p-4 rounded shadow">
-          <Chart type="bar" data={chartData} />
-        </div>
+      {series.length > 0 ? (
+        <ApexChart
+          options={options}
+          series={series}
+          type="candlestick"
+          height={350}
+        />
+      ) : (
+        <p className="text-gray-500">No data available for {symbol}.</p>
       )}
     </main>
   );
