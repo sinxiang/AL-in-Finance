@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import yahooFinance from 'yahoo-finance2';
 import { createChart, Time } from 'lightweight-charts';
 
 type Candle = {
@@ -20,26 +19,31 @@ export default function Home() {
 
   const fetchData = async () => {
     try {
-      const result = await yahooFinance.historical(symbol, {
-        period1: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
-        period2: new Date(),
-      });
+      const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=1mo&interval=1d`);
+      const data = await response.json();
 
-      const candleData: Candle[] = result.reverse().map((d) => ({
-        time: d.date.toISOString().split('T')[0] as Time,
-        open: d.open,
-        high: d.high,
-        low: d.low,
-        close: d.close,
+      if (!data.chart?.result) throw new Error('Invalid symbol');
+
+      const result = data.chart.result[0];
+      const timestamps = result.timestamp;
+      const quotes = result.indicators.quote[0];
+
+      const candleData: Candle[] = timestamps.map((t: number, i: number) => ({
+        time: new Date(t * 1000).toISOString().split('T')[0] as Time,
+        open: quotes.open[i],
+        high: quotes.high[i],
+        low: quotes.low[i],
+        close: quotes.close[i],
       }));
 
       setCandles(candleData);
       setError(null);
-    } catch {
+    } catch (err) {
       setError('Invalid stock symbol or API error.');
       setCandles([]);
     }
   };
+  
 
   useEffect(() => {
     if (!chartContainerRef.current || candles.length === 0) return;
