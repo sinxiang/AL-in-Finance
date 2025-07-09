@@ -1,12 +1,6 @@
-# backend/main.py
-
-import sys
-import os
-sys.path.append(os.path.dirname(__file__))
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from predict_api import router as predict_router
+from backend.predict_api import router as predict_router  # ✅ 注意这里加了 backend.
 
 app = FastAPI()
 
@@ -18,4 +12,5 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include API routes
 app.include_router(predict_router, prefix="/api")

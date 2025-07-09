@@ -5,9 +5,9 @@ from sklearn.ensemble import RandomForestRegressor
 import numpy as np
 import yfinance as yf
 
-router = APIRouter()
+router = APIRouter()  # ⬅️ FastAPI 子路由对象
 
-@router.get("/api/predict")
+@router.get("/predict")
 def predict_stock(symbol: str = "AAPL"):
     end_date = datetime.today()
     start_date = end_date - timedelta(days=180)
