@@ -1,17 +1,21 @@
+# backend/main.py
+
+import sys
+import os
+sys.path.append(os.path.dirname(__file__))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from predict_api import router as predict_router
 
 app = FastAPI()
 
-# 添加跨域支持
+# Allow CORS for all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 可替换为前端 URL 例如 "http://localhost:3000"
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 注册预测路由
-app.include_router(predict_router)
+app.include_router(predict_router, prefix="/api")
