@@ -3,8 +3,8 @@
 import { useState, useEffect, useCallback } from "react"
 import axios from "axios"
 import dynamic from "next/dynamic"
-import { Input } from "@/components/ui/input"
-import { Button } from "@/components/ui/button"
+import { Input } from "../components/ui/input"
+import { Button } from "../components/ui/button"
 
 const Chart = dynamic(() => import("react-apexcharts"), { ssr: false })
 

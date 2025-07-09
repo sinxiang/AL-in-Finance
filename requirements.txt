@@ -1,6 +1,0 @@
-fastapi
-uvicorn
-scikit-learn
-yfinance
-numpy
-pandas
