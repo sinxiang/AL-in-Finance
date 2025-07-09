@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button"
 
 const Chart = dynamic(() => import("react-apexcharts"), { ssr: false })
 
-// 定义数据点类型
 interface CandleDataPoint {
   x: Date
   y: [number, number, number, number]
@@ -33,18 +32,14 @@ export default function HomePage() {
       setError("")
 
       const [chartRes, predRes] = await Promise.all([
-        axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`),
-        axios.post("https://al-in-finance.onrender.com/api/predict", {
-          symbol,
-          days: 5,
-        }),
+        axios.get(`/api/stock?symbol=${symbol}`),
+        axios.get(`/api/predict?symbol=${symbol}`),
       ])
 
-      // 🟩 蜡烛图数据处理
       const timestamps: number[] = chartRes.data.chart.result[0].timestamp
       const ohlc = chartRes.data.chart.result[0].indicators.quote[0]
 
-      const formattedChartData: CandleDataPoint[] = timestamps.map((t: number, i: number) => ({
+      const formattedChartData: CandleDataPoint[] = timestamps.map((t, i) => ({
         x: new Date(t * 1000),
         y: [
           ohlc.open[i],
@@ -54,17 +49,13 @@ export default function HomePage() {
         ].map((v) => Number(v.toFixed(2))) as [number, number, number, number],
       }))
 
-      // 🟦 预测图数据处理
       const futurePreds: number[] = predRes.data.predictions || []
       const lastDate = new Date(timestamps[timestamps.length - 1] * 1000)
 
       const formattedPredictionData: PredictionDataPoint[] = futurePreds.map((val, idx) => {
         const futureDate = new Date(lastDate)
         futureDate.setDate(futureDate.getDate() + idx + 1)
-        return {
-          x: futureDate,
-          y: typeof val === "number" ? Number(val.toFixed(2)) : 0,
-        }
+        return { x: futureDate, y: Number(val.toFixed(2)) }
       })
 
       setChartData(formattedChartData)
