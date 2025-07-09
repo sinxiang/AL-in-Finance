@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import axios from "axios"
 import dynamic from "next/dynamic"
 import { Input } from "@/components/ui/input"
@@ -8,62 +8,78 @@ import { Button } from "@/components/ui/button"
 
 const Chart = dynamic(() => import("react-apexcharts"), { ssr: false })
 
+// 定义数据点类型
+interface CandleDataPoint {
+  x: Date
+  y: [number, number, number, number]
+}
+
+interface PredictionDataPoint {
+  x: Date
+  y: number
+}
+
 export default function HomePage() {
   const [symbol, setSymbol] = useState("AAPL")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [chartData, setChartData] = useState<any[]>([])
-  const [predictionData, setPredictionData] = useState<any[]>([])
+  const [chartData, setChartData] = useState<CandleDataPoint[]>([])
+  const [predictionData, setPredictionData] = useState<PredictionDataPoint[]>([])
   const [showPrediction, setShowPrediction] = useState(true)
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true)
       setError("")
 
       const [chartRes, predRes] = await Promise.all([
         axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`),
-        axios.get(`/api/predict?symbol=${symbol}`),
+        axios.post("https://al-in-finance.onrender.com/api/predict", {
+          symbol,
+          days: 5,
+        }),
       ])
 
       // 🟩 蜡烛图数据处理
-      const timestamps = chartRes.data.chart.result[0].timestamp
+      const timestamps: number[] = chartRes.data.chart.result[0].timestamp
       const ohlc = chartRes.data.chart.result[0].indicators.quote[0]
 
-      const formattedChartData = timestamps.map((t: number, i: number) => ({
+      const formattedChartData: CandleDataPoint[] = timestamps.map((t: number, i: number) => ({
         x: new Date(t * 1000),
         y: [
           ohlc.open[i],
           ohlc.high[i],
           ohlc.low[i],
           ohlc.close[i],
-        ].map(v => Number(v.toFixed(2))),
+        ].map((v) => Number(v.toFixed(2))) as [number, number, number, number],
       }))
 
       // 🟦 预测图数据处理
-      const futurePreds = predRes.data.predictions || []
+      const futurePreds: number[] = predRes.data.predictions || []
       const lastDate = new Date(timestamps[timestamps.length - 1] * 1000)
 
-      const formattedPredictionData = futurePreds.map((val: any, idx: number) => {
+      const formattedPredictionData: PredictionDataPoint[] = futurePreds.map((val, idx) => {
         const futureDate = new Date(lastDate)
         futureDate.setDate(futureDate.getDate() + idx + 1)
-        const yVal = typeof val === "number" ? Number(val.toFixed(2)) : 0
-        return { x: futureDate, y: yVal }
+        return {
+          x: futureDate,
+          y: typeof val === "number" ? Number(val.toFixed(2)) : 0,
+        }
       })
 
       setChartData(formattedChartData)
       setPredictionData(formattedPredictionData)
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error fetching data:", err)
       setError("Failed to fetch stock or prediction data.")
     } finally {
       setLoading(false)
     }
-  }
+  }, [symbol])
 
   useEffect(() => {
     fetchData()
-  }, [])
+  }, [fetchData])
 
   return (
     <main className="p-6 max-w-4xl mx-auto space-y-6">
