@@ -1,55 +1,72 @@
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
-from datetime import datetime, timedelta
-from sklearn.ensemble import RandomForestRegressor
-import numpy as np
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
+from typing import List
 import yfinance as yf
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import MinMaxScaler
 
-router = APIRouter()  # ⬅️ FastAPI 子路由对象
+router = APIRouter()
 
-@router.get("/predict")
-def predict_stock(symbol: str = "AAPL"):
-    end_date = datetime.today()
-    start_date = end_date - timedelta(days=180)
+class PredictRequest(BaseModel):
+    symbol: str
+    days: int = 7
 
-    df = yf.download(symbol, start=start_date.strftime("%Y-%m-%d"), end=end_date.strftime("%Y-%m-%d"))
+@router.post("/api/predict")
+async def predict_stock(request: PredictRequest):
+    try:
+        df = yf.download(request.symbol, period="6mo", interval="1d")
+        df.dropna(inplace=True)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
-    if df.empty:
-        return JSONResponse(status_code=404, content={"message": "No data found"})
+    if df.empty or len(df) < 60:
+        raise HTTPException(status_code=404, detail="Not enough data")
 
-    features, labels = [], []
-    for i in range(1, len(df)):
-        features.append([
-            float(df["Open"].iloc[i - 1]),
-            float(df["High"].iloc[i - 1]),
-            float(df["Low"].iloc[i - 1]),
-            float(df["Close"].iloc[i - 1]),
-            float(df["Volume"].iloc[i - 1]),
-        ])
-        labels.append(float(df["Close"].iloc[i]))
+    # 🔧 特征工程：添加更多指标可提高性能
+    df["HL_PCT"] = (df["High"] - df["Low"]) / df["Low"]
+    df["CHG_PCT"] = (df["Close"] - df["Open"]) / df["Open"]
+    df_feat = df[["Open", "High", "Low", "Close", "Volume", "HL_PCT", "CHG_PCT"]].copy()
 
-    model = RandomForestRegressor(n_estimators=100)
-    model.fit(features, labels)
+    # 🔢 归一化
+    scaler = MinMaxScaler()
+    scaled = scaler.fit_transform(df_feat)
 
-    predictions = []
-    last_row = df.iloc[[-1]]
-    current_features = [
-        float(last_row["Open"].iloc[0]),
-        float(last_row["High"].iloc[0]),
-        float(last_row["Low"].iloc[0]),
-        float(last_row["Close"].iloc[0]),
-        float(last_row["Volume"].iloc[0]),
-    ]
+    X = scaled[:-1]
+    y = scaled[1:, 3]  # Close price for next day
 
-    for _ in range(7):
-        prediction = model.predict([current_features])[0]
-        predictions.append(round(prediction, 2))
-        current_features = [
-            float(last_row["Close"].iloc[0]),
-            max(float(last_row["Close"].iloc[0]), prediction),
-            min(float(last_row["Close"].iloc[0]), prediction),
-            prediction,
-            float(last_row["Volume"].iloc[0]) * 1.01,
-        ]
+    # ⏩ 多模型训练
+    rf = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
+    gb = GradientBoostingRegressor(n_estimators=150, learning_rate=0.1, max_depth=5, random_state=42)
+    lr = LinearRegression()
 
-    return {"symbol": symbol, "predictions": predictions}
+    rf.fit(X, y)
+    gb.fit(X, y)
+    lr.fit(X, y)
+
+    # 🔁 滚动预测
+    last_row = scaled[-1:]
+    preds = []
+
+    for _ in range(request.days):
+        rf_pred = rf.predict(last_row)[0]
+        gb_pred = gb.predict(last_row)[0]
+        lr_pred = lr.predict(last_row)[0]
+
+        # 🎯 组合预测
+        avg_pred = np.mean([rf_pred, gb_pred, lr_pred])
+        preds.append(avg_pred)
+
+        # 创建下一时刻的输入（简单滚动方式）
+        next_row = last_row[0].copy()
+        next_row[3] = avg_pred  # 更新 Close 值
+        last_row = np.vstack([last_row[0], next_row])[1:].reshape(1, -1)
+
+    # ⏪ 反归一化 close 值
+    dummy = np.zeros((len(preds), df_feat.shape[1]))
+    dummy[:, 3] = preds
+    inv_preds = scaler.inverse_transform(dummy)[:, 3]
+
+    return {"predictions": [round(x, 2) for x in inv_preds.tolist()]}

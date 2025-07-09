@@ -73,34 +73,37 @@ export default function HomePage() {
   }, [fetchData])
 
   return (
-    <main className="p-6 max-w-4xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold">📈 Stock Chart with Prediction</h1>
+    <main className="p-6 max-w-5xl mx-auto space-y-8">
+      <h1 className="text-3xl font-extrabold text-center text-gray-800">📈 Stock Forecast Dashboard</h1>
 
-      <div className="flex space-x-2">
-        <Input
-          value={symbol}
-          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-          placeholder="Enter Stock Symbol (e.g., AAPL)"
-          className="max-w-xs"
-        />
-        <Button onClick={fetchData} disabled={loading}>
-          {loading ? "Loading..." : "Load"}
-        </Button>
-      </div>
+      <section className="bg-white shadow-lg rounded-2xl p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row items-center gap-4">
+          <Input
+            value={symbol}
+            onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+            placeholder="Enter Stock Symbol (e.g., AAPL)"
+            className="w-full sm:max-w-xs border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+          />
+          <Button onClick={fetchData} disabled={loading} className="w-full sm:w-auto">
+            {loading ? "Loading..." : "Load"}
+          </Button>
+        </div>
 
-      <div className="flex items-center space-x-2">
-        <input
-          type="checkbox"
-          checked={showPrediction}
-          onChange={() => setShowPrediction(!showPrediction)}
-        />
-        <label>Show Prediction</label>
-      </div>
+        <div className="flex items-center space-x-2">
+          <input
+            type="checkbox"
+            checked={showPrediction}
+            onChange={() => setShowPrediction(!showPrediction)}
+            className="w-4 h-4"
+          />
+          <label className="text-sm text-gray-700">Show Prediction</label>
+        </div>
 
-      {error && <p className="text-red-500">{error}</p>}
+        {error && <p className="text-red-500 font-medium">{error}</p>}
+      </section>
 
-      <section className="bg-white shadow rounded-lg p-4">
-        <h2 className="text-lg font-semibold mb-2">🕯️ Historical Candlestick Chart</h2>
+      <section className="bg-white shadow-md rounded-xl p-6">
+        <h2 className="text-lg font-semibold mb-4">🕯️ Historical Candlestick Chart</h2>
         {chartData.length > 0 ? (
           <Chart
             type="candlestick"
@@ -112,13 +115,13 @@ export default function HomePage() {
             }}
           />
         ) : (
-          <p>No chart data</p>
+          <p className="text-sm text-gray-500">No chart data</p>
         )}
       </section>
 
       {showPrediction && (
-        <section className="bg-white shadow rounded-lg p-4">
-          <h2 className="text-lg font-semibold mb-2">🔮 Predicted Close Prices (Line Chart)</h2>
+        <section className="bg-white shadow-md rounded-xl p-6">
+          <h2 className="text-lg font-semibold mb-4">🔮 Predicted Close Prices</h2>
           {predictionData.length > 0 ? (
             <Chart
               type="line"
@@ -130,7 +133,7 @@ export default function HomePage() {
               }}
             />
           ) : (
-            <p>No prediction data</p>
+            <p className="text-sm text-gray-500">No prediction data</p>
           )}
         </section>
       )}
