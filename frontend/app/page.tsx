@@ -31,11 +31,16 @@ export default function HomePage() {
       setLoading(true)
       setError("")
 
+      // 获取历史数据和预测数据
       const [chartRes, predRes] = await Promise.all([
-        axios.get(`/api/stock?symbol=${symbol}`),
-        axios.get(`/api/predict?symbol=${symbol}`),
+        axios.get(`/api/stock?symbol=${symbol}`), // 本地 stock 接口（仍在 Vercel）
+        axios.post(`https://al-in-finance.onrender.com/api/predict`, {
+          symbol: symbol,
+          days: 7, // 默认预测 7 天
+        }),
       ])
 
+      // 处理历史蜡烛图数据
       const timestamps: number[] = chartRes.data.chart.result[0].timestamp
       const ohlc = chartRes.data.chart.result[0].indicators.quote[0]
 
@@ -49,6 +54,7 @@ export default function HomePage() {
         ].map((v) => Number(v.toFixed(2))) as [number, number, number, number],
       }))
 
+      // 处理预测结果
       const futurePreds: number[] = predRes.data.predictions || []
       const lastDate = new Date(timestamps[timestamps.length - 1] * 1000)
 
