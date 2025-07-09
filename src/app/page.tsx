@@ -1,105 +1,132 @@
-"use client";
+"use client"
 
-import React, { useEffect, useState } from "react";
-import dynamic from "next/dynamic";
-import axios from "axios";
+import { useState, useEffect } from "react"
+import axios from "axios"
+import dynamic from "next/dynamic"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 
-// 动态加载 ApexCharts（避免 SSR 报错）
-const ApexChart = dynamic(() => import("react-apexcharts"), { ssr: false });
+const Chart = dynamic(() => import("react-apexcharts"), { ssr: false })
 
-export default function Home() {
-  const [symbol, setSymbol] = useState("AAPL");
-  const [input, setInput] = useState("AAPL");
-  const [series, setSeries] = useState<any[]>([]);
-  const [options, setOptions] = useState<any>({
-    chart: {
-      type: "candlestick",
-      height: 350,
-    },
-    title: {
-      text: "Stock Candlestick Chart",
-      align: "left",
-    },
-    xaxis: {
-      type: "datetime",
-    },
-    yaxis: {
-      tooltip: {
-        enabled: true,
-      },
-    },
-  });
+export default function HomePage() {
+  const [symbol, setSymbol] = useState("AAPL")
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState("")
+  const [chartData, setChartData] = useState<any[]>([])
+  const [predictionData, setPredictionData] = useState<any[]>([])
+  const [showPrediction, setShowPrediction] = useState(true)
 
-  const fetchData = async (ticker: string) => {
+  const fetchData = async () => {
     try {
-      const res = await axios.get(`/api/stock?symbol=${ticker}`);
-      const result = res.data.chart.result?.[0];
+      setLoading(true)
+      setError("")
 
-      if (!result) throw new Error("No data returned");
+      const [chartRes, predRes] = await Promise.all([
+        axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`),
+        axios.get(`/api/predict?symbol=${symbol}`),
+      ])
 
-      const timestamps = result.timestamp;
-      const ohlc = result.indicators.quote[0];
+      // 🟩 蜡烛图数据处理
+      const timestamps = chartRes.data.chart.result[0].timestamp
+      const ohlc = chartRes.data.chart.result[0].indicators.quote[0]
 
-      const formattedData = timestamps.map((t: number, i: number) => ({
+      const formattedChartData = timestamps.map((t: number, i: number) => ({
         x: new Date(t * 1000),
         y: [
           ohlc.open[i],
           ohlc.high[i],
           ohlc.low[i],
           ohlc.close[i],
-        ].map((v) => parseFloat(v.toFixed(2))),
-      }));
+        ].map(v => Number(v.toFixed(2))),
+      }))
 
-      setSeries([{ data: formattedData }]);
-      setOptions((prev: any) => ({
-        ...prev,
-        title: { text: `${ticker.toUpperCase()} Stock Candlestick Chart` },
-      }));
-    } catch (err) {
-      console.error("Failed to fetch data:", err);
-      setSeries([]);
+      // 🟦 预测图数据处理
+      const futurePreds = predRes.data.predictions || []
+      const lastDate = new Date(timestamps[timestamps.length - 1] * 1000)
+
+      const formattedPredictionData = futurePreds.map((val: any, idx: number) => {
+        const futureDate = new Date(lastDate)
+        futureDate.setDate(futureDate.getDate() + idx + 1)
+        const yVal = typeof val === "number" ? Number(val.toFixed(2)) : 0
+        return { x: futureDate, y: yVal }
+      })
+
+      setChartData(formattedChartData)
+      setPredictionData(formattedPredictionData)
+    } catch (err: any) {
+      console.error("Error fetching data:", err)
+      setError("Failed to fetch stock or prediction data.")
+    } finally {
+      setLoading(false)
     }
-  };
+  }
 
   useEffect(() => {
-    fetchData(symbol);
-  }, [symbol]);
+    fetchData()
+  }, [])
 
   return (
-    <main className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Stock Candle Chart Viewer</h1>
+    <main className="p-6 max-w-4xl mx-auto space-y-6">
+      <h1 className="text-2xl font-bold">📈 Stock Chart with Prediction</h1>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setSymbol(input.trim().toUpperCase());
-        }}
-        className="flex gap-2 mb-6"
-      >
+      <div className="flex space-x-2">
+        <Input
+          value={symbol}
+          onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+          placeholder="Enter Stock Symbol (e.g., AAPL)"
+          className="max-w-xs"
+        />
+        <Button onClick={fetchData} disabled={loading}>
+          {loading ? "Loading..." : "Load"}
+        </Button>
+      </div>
+
+      <div className="flex items-center space-x-2">
         <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          className="border px-4 py-2 rounded w-40"
-          placeholder="Enter stock symbol"
+          type="checkbox"
+          checked={showPrediction}
+          onChange={() => setShowPrediction(!showPrediction)}
         />
-        <button
-          type="submit"
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          Search
-        </button>
-      </form>
+        <label>Show Prediction</label>
+      </div>
 
-      {series.length > 0 ? (
-        <ApexChart
-          options={options}
-          series={series}
-          type="candlestick"
-          height={350}
-        />
-      ) : (
-        <p className="text-gray-500">No data available for {symbol}.</p>
+      {error && <p className="text-red-500">{error}</p>}
+
+      <section className="bg-white shadow rounded-lg p-4">
+        <h2 className="text-lg font-semibold mb-2">🕯️ Historical Candlestick Chart</h2>
+        {chartData.length > 0 ? (
+          <Chart
+            type="candlestick"
+            series={[{ data: chartData }]}
+            options={{
+              chart: { id: "candles", height: 350, type: "candlestick" },
+              xaxis: { type: "datetime" },
+              yaxis: { tooltip: { enabled: true } },
+            }}
+          />
+        ) : (
+          <p>No chart data</p>
+        )}
+      </section>
+
+      {showPrediction && (
+        <section className="bg-white shadow rounded-lg p-4">
+          <h2 className="text-lg font-semibold mb-2">🔮 Predicted Close Prices (Line Chart)</h2>
+          {predictionData.length > 0 ? (
+            <Chart
+              type="line"
+              series={[{ name: "Prediction", data: predictionData }]}
+              options={{
+                chart: { id: "prediction", height: 350 },
+                xaxis: { type: "datetime" },
+                yaxis: { decimalsInFloat: 2 },
+              }}
+            />
+          ) : (
+            <p>No prediction data</p>
+          )}
+        </section>
       )}
     </main>
-  );
+  )
 }
