@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useState, useCallback, useEffect } from "react"
+import React, { useState, useCallback } from "react"
 import axios from "axios"
 import {
   Chart as ChartJS,
@@ -119,10 +119,6 @@ export default function StockChartPage() {
     }
   }, [symbol, days, model])
 
-  useEffect(() => {
-    fetchData()
-  }, [fetchData])
-
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <h1 className="text-2xl font-semibold mb-4">📈 Stock Predictor</h1>
@@ -170,45 +166,47 @@ export default function StockChartPage() {
 
       {error && <p className="text-red-600 mb-4">{error}</p>}
 
-      <div className="bg-white shadow rounded-lg p-4">
-        <Line
-          data={{
-            labels: [...chartData.map((d) => d.x), ...predictionData.map((d) => d.x)],
-            datasets: [
-              {
-                label: "Close Price (Historical)",
-                data: chartData.map((d) => d.y[3]),
-                borderColor: "blue",
-                backgroundColor: "rgba(0,0,255,0.1)",
-                fill: false,
+      {chartData.length > 0 && (
+        <div className="bg-white shadow rounded-lg p-4">
+          <Line
+            data={{
+              labels: [...chartData.map((d) => d.x), ...predictionData.map((d) => d.x)],
+              datasets: [
+                {
+                  label: "Close Price (Historical)",
+                  data: chartData.map((d) => d.y[3]),
+                  borderColor: "blue",
+                  backgroundColor: "rgba(0,0,255,0.1)",
+                  fill: false,
+                },
+                {
+                  label: "Predicted Close",
+                  data: [
+                    ...new Array(chartData.length).fill(null),
+                    ...predictionData.map((d) => d.y),
+                  ],
+                  borderColor: "green",
+                  backgroundColor: "rgba(0,255,0,0.1)",
+                  fill: false,
+                },
+              ],
+            }}
+            options={{
+              responsive: true,
+              scales: {
+                x: {
+                  type: "time",
+                  time: { unit: "day" },
+                  title: { display: true, text: "Date" },
+                },
+                y: {
+                  title: { display: true, text: "Price (USD)" },
+                },
               },
-              {
-                label: "Predicted Close",
-                data: [
-                  ...new Array(chartData.length).fill(null),
-                  ...predictionData.map((d) => d.y),
-                ],
-                borderColor: "green",
-                backgroundColor: "rgba(0,255,0,0.1)",
-                fill: false,
-              },
-            ],
-          }}
-          options={{
-            responsive: true,
-            scales: {
-              x: {
-                type: "time",
-                time: { unit: "day" },
-                title: { display: true, text: "Date" },
-              },
-              y: {
-                title: { display: true, text: "Price (USD)" },
-              },
-            },
-          }}
-        />
-      </div>
+            }}
+          />
+        </div>
+      )}
 
       {metrics?.metrics && (
         <div className="mt-6 text-sm text-gray-700 space-y-1">
