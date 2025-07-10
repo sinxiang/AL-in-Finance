@@ -72,14 +72,11 @@ export default function StockChartPage() {
 
       const [chartRes, predRes] = await Promise.all([
         axios.get(`/api/stock?symbol=${symbol}`),
-        axios.post(
-          `https://al-in-finance.onrender.com/api/predict`,
-          { symbol, days, model },
-          {
-            headers: { "Content-Type": "application/json" },
-            timeout: 20000,
-          }
-        ),
+        axios.post(`https://al-in-finance.onrender.com/api/predict`, {
+          symbol,
+          days,
+          model,
+        }),
       ])
 
       const timestamps: number[] = chartRes.data.chart.result[0].timestamp
@@ -108,12 +105,9 @@ export default function StockChartPage() {
       setPredictionData(formattedPredictionData)
       setMetrics(predRes.data || null)
     } catch (err: unknown) {
-      console.error("Error fetching data:", err)
       if (axios.isAxiosError(err)) {
         if (err.response?.data?.detail) {
           setError(`Server Error: ${err.response.data.detail}`)
-        } else if (err.code === "ECONNABORTED") {
-          setError("Request timed out. Server may be asleep.")
         } else {
           setError("Network error. Failed to fetch data.")
         }
