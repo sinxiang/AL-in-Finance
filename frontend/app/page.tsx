@@ -20,6 +20,7 @@ interface PredictionDataPoint {
 
 export default function HomePage() {
   const [symbol, setSymbol] = useState("AAPL")
+  const [days, setDays] = useState(30)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [chartData, setChartData] = useState<CandleDataPoint[]>([])
@@ -31,16 +32,14 @@ export default function HomePage() {
       setLoading(true)
       setError("")
 
-      // 获取历史数据和预测数据
       const [chartRes, predRes] = await Promise.all([
-        axios.get(`/api/stock?symbol=${symbol}`), // 本地 stock 接口（仍在 Vercel）
+        axios.get(`/api/stock?symbol=${symbol}`),
         axios.post(`https://al-in-finance.onrender.com/api/predict`, {
-          symbol: symbol,
-          days: 7, // 默认预测 7 天
+          symbol,
+          days,
         }),
       ])
 
-      // 处理历史蜡烛图数据
       const timestamps: number[] = chartRes.data.chart.result[0].timestamp
       const ohlc = chartRes.data.chart.result[0].indicators.quote[0]
 
@@ -54,7 +53,6 @@ export default function HomePage() {
         ].map((v) => Number(v.toFixed(2))) as [number, number, number, number],
       }))
 
-      // 处理预测结果
       const futurePreds: number[] = predRes.data.predictions || []
       const lastDate = new Date(timestamps[timestamps.length - 1] * 1000)
 
@@ -72,7 +70,7 @@ export default function HomePage() {
     } finally {
       setLoading(false)
     }
-  }, [symbol])
+  }, [symbol, days])
 
   useEffect(() => {
     fetchData()
@@ -88,7 +86,14 @@ export default function HomePage() {
             value={symbol}
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
             placeholder="Enter Stock Symbol (e.g., AAPL)"
-            className="w-full sm:max-w-xs border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+            className="w-full sm:max-w-xs border-gray-300"
+          />
+          <Input
+            type="number"
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            placeholder="Days to Predict"
+            className="w-full sm:max-w-xs border-gray-300"
           />
           <Button onClick={fetchData} disabled={loading} className="w-full sm:w-auto">
             {loading ? "Loading..." : "Load"}
