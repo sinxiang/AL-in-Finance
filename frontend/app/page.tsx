@@ -1,39 +1,55 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import React, { useState, useCallback, useEffect } from "react"
 import axios from "axios"
-import dynamic from "next/dynamic"
-import { Input } from "../components/ui/input"
-import { Button } from "../components/ui/button"
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  TimeScale,
+  PointElement,
+  LineElement,
+  Tooltip,
+  Legend,
+  Filler,
+} from "chart.js"
+import { Line } from "react-chartjs-2"
+import "chartjs-adapter-date-fns"
+import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Label } from "@/components/ui/label"
 
-const Chart = dynamic(() => import("react-apexcharts"), { ssr: false })
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  TimeScale,
+  PointElement,
+  LineElement,
+  Tooltip,
+  Legend,
+  Filler
+)
 
-interface CandleDataPoint {
+type CandleDataPoint = {
   x: Date
   y: [number, number, number, number]
 }
 
-interface PredictionDataPoint {
+type PredictionDataPoint = {
   x: Date
   y: number
 }
 
-interface Metrics {
-  model: string
-  r2: number
-  mae: number
-}
-
-export default function HomePage() {
+export default function StockChartPage() {
   const [symbol, setSymbol] = useState("AAPL")
   const [days, setDays] = useState(30)
   const [model, setModel] = useState("ensemble")
-  const [metrics, setMetrics] = useState<Metrics | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
   const [chartData, setChartData] = useState<CandleDataPoint[]>([])
   const [predictionData, setPredictionData] = useState<PredictionDataPoint[]>([])
-  const [showPrediction, setShowPrediction] = useState(true)
+  const [metrics, setMetrics] = useState<any>(null)
+  const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
 
   const fetchData = useCallback(async () => {
     try {
@@ -43,11 +59,14 @@ export default function HomePage() {
 
       const [chartRes, predRes] = await Promise.all([
         axios.get(`/api/stock?symbol=${symbol}`),
-        axios.post(`https://al-in-finance.onrender.com/api/predict`, {
-          symbol,
-          days,
-          model,
-        }),
+        axios.post(
+          `https://al-in-finance.onrender.com/api/predict`,
+          { symbol, days, model },
+          {
+            headers: { "Content-Type": "application/json" },
+            timeout: 20000,
+          }
+        ),
       ])
 
       const timestamps: number[] = chartRes.data.chart.result[0].timestamp
@@ -74,10 +93,16 @@ export default function HomePage() {
 
       setChartData(formattedChartData)
       setPredictionData(formattedPredictionData)
-      setMetrics(predRes.data.metrics || null)
-    } catch (err) {
+      setMetrics(predRes.data || null)
+    } catch (err: any) {
       console.error("Error fetching data:", err)
-      setError("Failed to fetch stock or prediction data.")
+      if (err.response?.data?.detail) {
+        setError(`Server Error: ${err.response.data.detail}`)
+      } else if (err.code === "ECONNABORTED") {
+        setError("Request timed out. Server may be asleep.")
+      } else {
+        setError("Network error. Failed to fetch data.")
+      }
     } finally {
       setLoading(false)
     }
@@ -88,95 +113,105 @@ export default function HomePage() {
   }, [fetchData])
 
   return (
-    <main className="p-6 max-w-5xl mx-auto space-y-8">
-      <h1 className="text-3xl font-extrabold text-center text-gray-800">📈 Stock Forecast Dashboard</h1>
+    <div className="p-6 max-w-4xl mx-auto">
+      <h1 className="text-2xl font-semibold mb-4">📈 Stock Predictor</h1>
 
-      <section className="bg-white shadow-lg rounded-2xl p-6 space-y-4">
-        <div className="flex flex-col sm:flex-row flex-wrap items-center gap-4">
+      <div className="flex gap-4 mb-6 items-end flex-wrap">
+        <div>
+          <Label htmlFor="symbol">Symbol</Label>
           <Input
+            id="symbol"
             value={symbol}
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-            placeholder="Enter Stock Symbol (e.g., AAPL)"
-            className="w-full sm:max-w-xs border-gray-300"
+            placeholder="e.g. AAPL"
           />
+        </div>
+        <div>
+          <Label htmlFor="days">Forecast Days</Label>
           <Input
+            id="days"
             type="number"
+            min={1}
+            max={90}
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
-            placeholder="Days to Predict"
-            className="w-full sm:max-w-xs border-gray-300"
           />
-          <select
+        </div>
+        <div>
+          <Label htmlFor="model">Model</Label>
+          <ToggleGroup
+            type="single"
             value={model}
-            onChange={(e) => setModel(e.target.value)}
-            className="w-full sm:max-w-xs border-gray-300 rounded-md px-3 py-2 text-sm"
+            onValueChange={(val) => val && setModel(val)}
+            className="mt-1"
           >
-            <option value="ensemble">Ensemble (Avg)</option>
-            <option value="random_forest">Random Forest</option>
-            <option value="gb">Gradient Boosting</option>
-            <option value="linear">Linear Regression</option>
-            <option value="xgb">XGBoost</option>
-          </select>
-          <Button onClick={fetchData} disabled={loading} className="w-full sm:w-auto">
-            {loading ? "Loading..." : "Load"}
-          </Button>
+            <ToggleGroupItem value="ensemble">Ensemble</ToggleGroupItem>
+            <ToggleGroupItem value="random_forest">RF</ToggleGroupItem>
+            <ToggleGroupItem value="gb">GB</ToggleGroupItem>
+            <ToggleGroupItem value="xgb">XGB</ToggleGroupItem>
+            <ToggleGroupItem value="linear">Linear</ToggleGroupItem>
+          </ToggleGroup>
         </div>
+        <Button onClick={fetchData} disabled={loading}>
+          {loading ? "Loading..." : "Predict"}
+        </Button>
+      </div>
 
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            checked={showPrediction}
-            onChange={() => setShowPrediction(!showPrediction)}
-            className="w-4 h-4"
-          />
-          <label className="text-sm text-gray-700">Show Prediction</label>
+      {error && <p className="text-red-600 mb-4">{error}</p>}
+
+      <div className="bg-white shadow rounded-lg p-4">
+        <Line
+          data={{
+            labels: [...chartData.map((d) => d.x), ...predictionData.map((d) => d.x)],
+            datasets: [
+              {
+                label: "Close Price (Historical)",
+                data: chartData.map((d) => d.y[3]),
+                borderColor: "blue",
+                backgroundColor: "rgba(0,0,255,0.1)",
+                fill: false,
+              },
+              {
+                label: "Predicted Close",
+                data: [
+                  ...new Array(chartData.length).fill(null),
+                  ...predictionData.map((d) => d.y),
+                ],
+                borderColor: "green",
+                backgroundColor: "rgba(0,255,0,0.1)",
+                fill: false,
+              },
+            ],
+          }}
+          options={{
+            responsive: true,
+            scales: {
+              x: {
+                type: "time",
+                time: { unit: "day" },
+                title: { display: true, text: "Date" },
+              },
+              y: {
+                title: { display: true, text: "Price (USD)" },
+              },
+            },
+          }}
+        />
+      </div>
+
+      {metrics?.metrics && (
+        <div className="mt-6 text-sm text-gray-700 space-y-1">
+          <p>📊 Model: {metrics.metrics.model}</p>
+          <p>📈 R² Score: {metrics.metrics.r2}</p>
+          <p>📉 MAE: {metrics.metrics.mae}</p>
         </div>
-
-        {error && <p className="text-red-500 font-medium">{error}</p>}
-      </section>
-
-      <section className="bg-white shadow-md rounded-xl p-6">
-        <h2 className="text-lg font-semibold mb-4">🕯️ Historical Candlestick Chart</h2>
-        {chartData.length > 0 ? (
-          <Chart
-            type="candlestick"
-            series={[{ data: chartData }]}
-            options={{
-              chart: { id: "candles", height: 350, type: "candlestick" },
-              xaxis: { type: "datetime" },
-              yaxis: { tooltip: { enabled: true } },
-            }}
-          />
-        ) : (
-          <p className="text-sm text-gray-500">No chart data</p>
-        )}
-      </section>
-
-      {showPrediction && (
-        <section className="bg-white shadow-md rounded-xl p-6">
-          <h2 className="text-lg font-semibold mb-4">🔮 Predicted Close Prices</h2>
-          {predictionData.length > 0 ? (
-            <>
-              <Chart
-                type="line"
-                series={[{ name: `Prediction (${model})`, data: predictionData }]}
-                options={{
-                  chart: { id: "prediction", height: 350 },
-                  xaxis: { type: "datetime" },
-                  yaxis: { decimalsInFloat: 2 },
-                }}
-              />
-              {metrics && (
-                <div className="text-sm text-gray-600 mt-4">
-                  📊 Model: <b>{metrics.model}</b> | R²: <b>{metrics.r2}</b> | MAE: <b>{metrics.mae}</b>
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-gray-500">No prediction data</p>
-          )}
-        </section>
       )}
-    </main>
+
+      {metrics?.advice && (
+        <div className="mt-4 text-sm text-blue-700">
+          💡 <b>Advice:</b> {metrics.advice.suggestion}
+        </div>
+      )}
+    </div>
   )
 }
