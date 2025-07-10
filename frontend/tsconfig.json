@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "ES2017",
+    "target": "es5",
     "lib": [
       "dom",
       "dom.iterable",
@@ -9,6 +9,7 @@
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
+    "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "esModuleInterop": true,
     "module": "esnext",
@@ -16,24 +17,17 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "preserve",
-    "incremental": true,
-    "baseUrl": ".", // ✅ 添加 baseUrl
+    "baseUrl": ".", // ✅ 设置 baseUrl 为项目根目录
     "paths": {
       "@/*": [
-        "src/*"
-      ] // ✅ 如果你想用 @ 来代表 src 目录，那这里应该指向 src/*
-    },
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ]
+        "./*"
+      ] // ✅ 修复别名：映射到根目录
+    }
   },
   "include": [
     "next-env.d.ts",
     "**/*.ts",
-    "**/*.tsx",
-    ".next/types/**/*.ts"
+    "**/*.tsx"
   ],
   "exclude": [
     "node_modules"
