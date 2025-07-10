@@ -4,4 +4,3 @@ scikit-learn
 yfinance
 numpy
 pandas
-tensorflow
