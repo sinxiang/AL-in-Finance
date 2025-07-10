@@ -19,8 +19,15 @@ router = APIRouter()
 class PredictRequest(BaseModel):
     symbol: str
     days: int = 30
-    model: str = "random_forest"
+    model: str = "ensemble"
     start: str = "2015-01-01"
+
+def compute_rsi(series, period=14):
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / (loss + 1e-6)
+    return 100 - (100 / (1 + rs))
 
 @router.post("/predict")
 async def predict_stock(request: PredictRequest):
@@ -33,50 +40,58 @@ async def predict_stock(request: PredictRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
-    if df.empty or len(df) < 60:
+    if df.empty or len(df) < 100:
         raise HTTPException(status_code=404, detail="Not enough data")
 
+    # 添加增强型技术特征
     df["HL_PCT"] = (df["High"] - df["Low"]) / df["Low"]
     df["CHG_PCT"] = (df["Close"] - df["Open"]) / df["Open"]
-    df_feat = df[["Open", "High", "Low", "Close", "Volume", "HL_PCT", "CHG_PCT"]].copy()
+    df["SMA_10"] = df["Close"].rolling(window=10).mean()
+    df["EMA_10"] = df["Close"].ewm(span=10, adjust=False).mean()
+    df["RSI"] = compute_rsi(df["Close"])
+    df["Weekday"] = df.index.weekday / 6  # 归一化周期
+    df.dropna(inplace=True)
+
+    features = [
+        "Open", "High", "Low", "Close", "Volume",
+        "HL_PCT", "CHG_PCT", "SMA_10", "EMA_10", "RSI", "Weekday"
+    ]
+    df_feat = df[features]
 
     scaler = MinMaxScaler()
     scaled = scaler.fit_transform(df_feat)
 
     X = scaled[:-1]
-    y = scaled[1:, 3]
+    y = scaled[1:, 3]  # 下一日的 Close
 
     model_name = request.model.lower()
-
     models = {}
 
     if model_name == "ensemble":
-        models["rf"] = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
-        models["gb"] = GradientBoostingRegressor(n_estimators=150, learning_rate=0.1, max_depth=5, random_state=42)
+        models["rf"] = RandomForestRegressor(n_estimators=300, max_depth=12, random_state=42)
+        models["gb"] = GradientBoostingRegressor(n_estimators=200, learning_rate=0.05, max_depth=6, random_state=42)
         models["lr"] = LinearRegression()
         if has_xgb:
-            models["xgb"] = XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=4, random_state=42)
+            models["xgb"] = XGBRegressor(n_estimators=200, learning_rate=0.05, max_depth=4, random_state=42)
     else:
         if model_name == "random_forest":
-            models["rf"] = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
+            models["rf"] = RandomForestRegressor(n_estimators=300, max_depth=12, random_state=42)
         elif model_name == "gb":
-            models["gb"] = GradientBoostingRegressor(n_estimators=150, learning_rate=0.1, max_depth=5, random_state=42)
+            models["gb"] = GradientBoostingRegressor(n_estimators=200, learning_rate=0.05, max_depth=6, random_state=42)
         elif model_name == "linear":
             models["lr"] = LinearRegression()
         elif model_name == "xgb":
             if not has_xgb:
                 raise HTTPException(status_code=400, detail="XGBoost not installed.")
-            models["xgb"] = XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=4, random_state=42)
+            models["xgb"] = XGBRegressor(n_estimators=200, learning_rate=0.05, max_depth=4, random_state=42)
         else:
-            raise HTTPException(status_code=400, detail="Invalid model. Use: random_forest, gb, linear, xgb, ensemble")
+            raise HTTPException(status_code=400, detail="Invalid model. Use: ensemble, rf, gb, xgb, linear")
 
-    # 训练 & 评估
     preds_train = {}
     for name, model in models.items():
         model.fit(X, y)
         preds_train[name] = model.predict(X)
 
-    # 计算 ensemble 性能
     if model_name == "ensemble":
         ensemble_train_pred = np.mean(np.array(list(preds_train.values())), axis=0)
         r2 = r2_score(y, ensemble_train_pred)
@@ -110,6 +125,6 @@ async def predict_stock(request: PredictRequest):
         "metrics": {
             "model": model_name,
             "r2": round(r2, 4),
-            "mae": round(mae, 4),
+            "mae": round(mae, 4)
         }
     }
