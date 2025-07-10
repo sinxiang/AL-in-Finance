@@ -12,6 +12,8 @@ import {
   CategoryScale,
   LineElement,
   PointElement,
+  LineController,
+  Filler,
 } from "chart.js"
 
 import {
@@ -36,6 +38,8 @@ ChartJS.register(
   CategoryScale,
   LineElement,
   PointElement,
+  LineController,
+  Filler,
   CandlestickController,
   CandlestickElement
 )
@@ -203,6 +207,7 @@ export default function StockPage() {
                     d.c > d.o ? "#00b386" : d.c < d.o ? "#ff4d4f" : "#999"
                   ),
                   borderWidth: 1,
+                  barThickness: 5, // 控制蜡烛宽度
                 },
               ],
             }}
