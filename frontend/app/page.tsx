@@ -2,9 +2,20 @@
 
 import React, { useState, useCallback } from "react"
 import axios from "axios"
+
+import {
+  Chart as ChartJS,
+  TimeScale,
+  LinearScale,
+  Tooltip,
+  Legend,
+  CategoryScale,
+} from "chart.js"
+
 import "chartjs-chart-financial"
-import { Chart } from "react-chartjs-2"
 import "chartjs-adapter-date-fns"
+import { Chart } from "react-chartjs-2"
+
 
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -12,6 +23,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 
+
+ChartJS.register(TimeScale, LinearScale, Tooltip, Legend, CategoryScale)
 
 
 type CandleDataPoint = {
