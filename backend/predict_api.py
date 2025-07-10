@@ -1,164 +1,108 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import List, Optional
 import yfinance as yf
 import numpy as np
-import pandas as pd
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import MinMaxScaler
+from xgboost import XGBRegressor
 from sklearn.metrics import r2_score, mean_absolute_error
-
-try:
-    from xgboost import XGBRegressor
-    has_xgb = True
-except ImportError:
-    has_xgb = False
 
 router = APIRouter()
 
 class PredictRequest(BaseModel):
     symbol: str
-    days: int = 30
-    model: str = "ensemble"
-    start: str = "2015-01-01"
-
-def compute_rsi(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / (loss + 1e-6)
-    return 100 - (100 / (1 + rs))
+    days: int
+    model: Optional[str] = "ensemble"
 
 @router.post("/predict")
-async def predict_stock(request: PredictRequest):
-    if request.days > 90:
-        raise HTTPException(status_code=400, detail="Max prediction days is 90")
+async def predict_stock(payload: PredictRequest):
+    symbol = payload.symbol.upper()
+    days = min(payload.days, 90)  # 限制最大天数
+    model_name = payload.model or "ensemble"
+
+    print(f"[INFO] Predict request: {symbol}, days={days}, model={model_name}")
 
     try:
-        df = yf.download(request.symbol, start=request.start, interval="1d")
+        df = yf.download(symbol, period="180d", interval="1d", progress=False)
+        if df.empty:
+            raise HTTPException(status_code=400, detail="No data found.")
+
         df.dropna(inplace=True)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+        df["Target"] = df["Close"].shift(-1)
+        df.dropna(inplace=True)
 
-    if df.empty or len(df) < 200:
-        raise HTTPException(status_code=404, detail="Not enough data")
+        features = ["Open", "High", "Low", "Close", "Volume"]
+        X = df[features].values
+        y = df["Target"].values
 
-    df["HL_PCT"] = (df["High"] - df["Low"]) / df["Low"]
-    df["CHG_PCT"] = (df["Close"] - df["Open"]) / df["Open"]
-    df["SMA_10"] = df["Close"].rolling(window=10).mean()
-    df["EMA_10"] = df["Close"].ewm(span=10, adjust=False).mean()
-    df["RSI"] = compute_rsi(df["Close"])
-    df["Weekday"] = df.index.weekday / 6
-    df.dropna(inplace=True)
-
-    features = [
-        "Open", "High", "Low", "Close", "Volume",
-        "HL_PCT", "CHG_PCT", "SMA_10", "EMA_10", "RSI", "Weekday"
-    ]
-    df_feat = df[features]
-    scaler = MinMaxScaler()
-    scaled = scaler.fit_transform(df_feat)
-
-    window = 10
-    X, y = [], []
-    for i in range(len(scaled) - window):
-        X.append(scaled[i:i+window])
-        y.append(scaled[i + window][3])
-
-    X = np.array(X)
-    y = np.array(y)
-    X_reshaped = X.reshape(X.shape[0], -1)  # ✅ 修复维度报错
-
-    model_name = request.model.lower()
-    models = {}
-
-    if model_name == "ensemble":
-        models["rf"] = RandomForestRegressor(n_estimators=200, max_depth=12, random_state=42)
-        models["gb"] = GradientBoostingRegressor(n_estimators=150, learning_rate=0.05, max_depth=6, random_state=42)
-        models["lr"] = LinearRegression()
-        if has_xgb:
-            models["xgb"] = XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42)
-    else:
-        if model_name == "random_forest":
-            models["rf"] = RandomForestRegressor(n_estimators=300, max_depth=12, random_state=42)
-        elif model_name == "gb":
-            models["gb"] = GradientBoostingRegressor(n_estimators=200, learning_rate=0.05, max_depth=6, random_state=42)
-        elif model_name == "linear":
-            models["lr"] = LinearRegression()
-        elif model_name == "xgb":
-            if not has_xgb:
-                raise HTTPException(status_code=400, detail="XGBoost not installed.")
-            models["xgb"] = XGBRegressor(n_estimators=200, learning_rate=0.05, max_depth=4, random_state=42)
-        else:
-            raise HTTPException(status_code=400, detail="Invalid model")
-
-    preds_train = {}
-    for name, model in models.items():
-        model.fit(X_reshaped, y)
-        preds_train[name] = model.predict(X_reshaped)
-
-    if model_name == "ensemble":
-        ensemble_train_pred = np.mean(np.array(list(preds_train.values())), axis=0)
-        r2 = r2_score(y, ensemble_train_pred)
-        mae = mean_absolute_error(y, ensemble_train_pred)
-    else:
-        key = list(models.keys())[0]
-        r2 = r2_score(y, preds_train[key])
-        mae = mean_absolute_error(y, preds_train[key])
-
-    # ✅ 滚动预测
-    last_window = scaled[-window:]
-    preds = []
-    for _ in range(request.days):
-        step_preds = []
-        for model in models.values():
-            step_preds.append(model.predict(last_window.reshape(1, -1))[0])
-        avg_pred = np.mean(step_preds)
-        preds.append(avg_pred)
-        next_day = last_window[-1].copy()
-        next_day[3] = avg_pred
-        last_window = np.vstack([last_window[1:], next_day])
-
-    dummy = np.zeros((len(preds), df_feat.shape[1]))
-    dummy[:, 3] = preds
-    inv_preds = scaler.inverse_transform(dummy)[:, 3]
-
-    # ✅ 智能建议
-    start, end = preds[0], preds[-1]
-    slope = (end - start) / len(preds)
-    trend = "flat"
-    if slope > 0.01:
-        trend = "up"
-    elif slope < -0.01:
-        trend = "down"
-
-    volatility = (max(preds) - min(preds)) / (np.mean(preds) + 1e-6)
-    if volatility < 0.01:
-        risk = "low"
-    elif volatility < 0.03:
-        risk = "medium"
-    else:
-        risk = "high"
-
-    if trend == "up" and risk == "low":
-        suggestion = "Stable upward trend. May consider buying short-term."
-    elif trend == "up" and risk == "high":
-        suggestion = "Upward momentum with high volatility. Watch closely."
-    elif trend == "down":
-        suggestion = "Downward trend detected. Consider reducing exposure."
-    else:
-        suggestion = "No clear trend. Caution advised."
-
-    return {
-        "predictions": [round(x, 2) for x in inv_preds.tolist()],
-        "metrics": {
-            "model": model_name,
-            "r2": round(r2, 4),
-            "mae": round(mae, 4)
-        },
-        "advice": {
-            "trend": trend,
-            "risk": risk,
-            "suggestion": suggestion
+        models = {
+            "random_forest": RandomForestRegressor(n_estimators=100),
+            "gb": GradientBoostingRegressor(),
+            "xgb": XGBRegressor(verbosity=0),
+            "linear": LinearRegression(),
         }
-    }
+
+        preds_all = []
+        metrics_all = []
+
+        used_models = models if model_name == "ensemble" else {model_name: models[model_name]}
+
+        for name, model in used_models.items():
+            print(f"[INFO] Training model: {name}")
+            model.fit(X, y)
+
+            # 滑动窗口预测
+            recent_X = X[-1:]
+            preds = []
+            for _ in range(days):
+                pred = model.predict(recent_X)[0]
+                preds.append(pred)
+                new_row = np.append(recent_X[0][1:], pred).reshape(1, -1)
+                recent_X = np.concatenate([recent_X[:, 1:], [[pred]]], axis=1)
+
+            r2 = r2_score(y, model.predict(X))
+            mae = mean_absolute_error(y, model.predict(X))
+            preds_all.append(preds)
+            metrics_all.append((name, r2, mae))
+
+        # 集成：平均值
+        final_preds = (
+            np.mean(preds_all, axis=0).tolist()
+            if model_name == "ensemble"
+            else preds_all[0]
+        )
+
+        # 最优模型评价
+        model_used = "ensemble" if model_name == "ensemble" else list(used_models.keys())[0]
+        model_r2 = np.mean([m[1] for m in metrics_all])
+        model_mae = np.mean([m[2] for m in metrics_all])
+
+        # 建议逻辑
+        trend = "upward" if final_preds[-1] > final_preds[0] else "downward"
+        risk = "low" if model_mae < 2 else "high"
+        suggestion = (
+            "Likely to rise, consider buying."
+            if trend == "upward" and risk == "low"
+            else "Trend uncertain or risk high, be cautious."
+        )
+
+        print("[INFO] Prediction completed.")
+
+        return {
+            "predictions": final_preds,
+            "metrics": {
+                "model": model_used,
+                "r2": round(model_r2, 4),
+                "mae": round(model_mae, 4),
+            },
+            "advice": {
+                "trend": trend,
+                "risk": risk,
+                "suggestion": suggestion,
+            },
+        }
+
+    except Exception as e:
+        print("[ERROR]", str(e))
+        raise HTTPException(status_code=500, detail="Prediction failed.")
