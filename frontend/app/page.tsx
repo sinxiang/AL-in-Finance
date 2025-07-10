@@ -196,13 +196,22 @@ export default function StockPage() {
                     l: d.l,
                     c: d.c,
                   })),
-                  borderColor: "gray",
+                  borderColor: candles.map((d) =>
+                    d.c > d.o ? "#00b386" : d.c < d.o ? "#ff4d4f" : "#999"
+                  ),
+                  backgroundColor: candles.map((d) =>
+                    d.c > d.o ? "#00b386" : d.c < d.o ? "#ff4d4f" : "#999"
+                  ),
                   borderWidth: 1,
                 },
               ],
             }}
             options={{
               responsive: true,
+              plugins: {
+                legend: { display: true },
+                tooltip: { enabled: true },
+              },
               scales: {
                 x: {
                   type: "time",
