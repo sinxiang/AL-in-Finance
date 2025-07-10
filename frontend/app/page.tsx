@@ -11,9 +11,9 @@ import {
   CategoryScale,
 } from "chart.js"
 import "chartjs-chart-financial"
-
 import { Chart } from "react-chartjs-2"
 import "chartjs-adapter-date-fns"
+
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -25,7 +25,7 @@ ChartJS.register(
   TimeScale,
   LinearScale,
   Tooltip,
-  Legend,
+  Legend
 )
 
 type CandleDataPoint = {
@@ -87,7 +87,7 @@ export default function StockPage() {
       const timestamps: number[] = chartRes.data.chart.result[0].timestamp
       const ohlc = chartRes.data.chart.result[0].indicators.quote[0]
 
-      const formattedCandles = timestamps.map((t, i) => ({
+      const formattedCandles: CandleDataPoint[] = timestamps.map((t, i) => ({
         x: new Date(t * 1000),
         o: Number(ohlc.open[i].toFixed(2)),
         h: Number(ohlc.high[i].toFixed(2)),
@@ -107,7 +107,7 @@ export default function StockPage() {
         setPredictions(formattedPreds)
         setMetrics(predRes.data || null)
       }
-    } catch (err) {
+    } catch {
       setError("Failed to load data. Please try again.")
     } finally {
       setLoading(false)
