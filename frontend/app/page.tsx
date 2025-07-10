@@ -41,13 +41,26 @@ type PredictionDataPoint = {
   y: number
 }
 
+type MetricInfo = {
+  metrics?: {
+    model: string
+    r2: number
+    mae: number
+  }
+  advice?: {
+    trend: string
+    risk: string
+    suggestion: string
+  }
+}
+
 export default function StockChartPage() {
   const [symbol, setSymbol] = useState("AAPL")
   const [days, setDays] = useState(30)
   const [model, setModel] = useState("ensemble")
   const [chartData, setChartData] = useState<CandleDataPoint[]>([])
   const [predictionData, setPredictionData] = useState<PredictionDataPoint[]>([])
-  const [metrics, setMetrics] = useState<any>(null)
+  const [metrics, setMetrics] = useState<MetricInfo | null>(null)
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -94,14 +107,18 @@ export default function StockChartPage() {
       setChartData(formattedChartData)
       setPredictionData(formattedPredictionData)
       setMetrics(predRes.data || null)
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Error fetching data:", err)
-      if (err.response?.data?.detail) {
-        setError(`Server Error: ${err.response.data.detail}`)
-      } else if (err.code === "ECONNABORTED") {
-        setError("Request timed out. Server may be asleep.")
+      if (axios.isAxiosError(err)) {
+        if (err.response?.data?.detail) {
+          setError(`Server Error: ${err.response.data.detail}`)
+        } else if (err.code === "ECONNABORTED") {
+          setError("Request timed out. Server may be asleep.")
+        } else {
+          setError("Network error. Failed to fetch data.")
+        }
       } else {
-        setError("Network error. Failed to fetch data.")
+        setError("Unknown error occurred.")
       }
     } finally {
       setLoading(false)
