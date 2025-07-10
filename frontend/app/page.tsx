@@ -1,8 +1,7 @@
 "use client"
 
-import React, { useState, useCallback } from "react"
 import axios from "axios"
-
+import React, { useState, useCallback } from "react"
 import {
   Chart as ChartJS,
   TimeScale,
@@ -10,12 +9,12 @@ import {
   Tooltip,
   Legend,
   CategoryScale,
+  LineElement,
+  PointElement,
 } from "chart.js"
-
 import "chartjs-chart-financial"
 import "chartjs-adapter-date-fns"
 import { Chart } from "react-chartjs-2"
-
 
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -23,9 +22,15 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 
-
-ChartJS.register(TimeScale, LinearScale, Tooltip, Legend, CategoryScale)
-
+ChartJS.register(
+  TimeScale,
+  LinearScale,
+  Tooltip,
+  Legend,
+  CategoryScale,
+  LineElement,
+  PointElement
+)
 
 type CandleDataPoint = {
   x: Date
@@ -76,10 +81,10 @@ export default function StockPage() {
         axios.get(`/api/stock?symbol=${symbol}`),
         showPrediction
           ? axios.post("https://al-in-finance.onrender.com/api/predict", {
-            symbol,
-            days,
-            model,
-          })
+              symbol,
+              days,
+              model,
+            })
           : Promise.resolve({ data: {} }),
       ])
 
