@@ -1,7 +1,8 @@
 "use client"
 
-import axios from "axios"
 import React, { useState, useCallback } from "react"
+import axios from "axios"
+
 import {
   Chart as ChartJS,
   TimeScale,
@@ -12,9 +13,10 @@ import {
   LineElement,
   PointElement,
 } from "chart.js"
-import "chartjs-chart-financial"
-import "chartjs-adapter-date-fns"
+
 import { Chart } from "react-chartjs-2"
+import "chartjs-adapter-date-fns"
+import "chartjs-chart-financial" // ✅ 自动注册 candlestick 控件
 
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -81,10 +83,10 @@ export default function StockPage() {
         axios.get(`/api/stock?symbol=${symbol}`),
         showPrediction
           ? axios.post("https://al-in-finance.onrender.com/api/predict", {
-              symbol,
-              days,
-              model,
-            })
+            symbol,
+            days,
+            model,
+          })
           : Promise.resolve({ data: {} }),
       ])
 
