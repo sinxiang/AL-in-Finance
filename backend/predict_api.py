@@ -1,18 +1,26 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import yfinance as yf
-import pandas as pd
 import numpy as np
+import pandas as pd
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import r2_score, mean_absolute_error
+
+try:
+    from xgboost import XGBRegressor
+    has_xgb = True
+except ImportError:
+    has_xgb = False
 
 router = APIRouter()
 
 class PredictRequest(BaseModel):
     symbol: str
-    days: int = 30  # 默认预测 30 天
-    start: str = "2015-01-01"  # 默认获取从 2015 年起的数据
+    days: int = 30
+    model: str = "random_forest"
+    start: str = "2015-01-01"
 
 @router.post("/predict")
 async def predict_stock(request: PredictRequest):
@@ -28,34 +36,65 @@ async def predict_stock(request: PredictRequest):
     if df.empty or len(df) < 60:
         raise HTTPException(status_code=404, detail="Not enough data")
 
-    # 添加技术指标
     df["HL_PCT"] = (df["High"] - df["Low"]) / df["Low"]
     df["CHG_PCT"] = (df["Close"] - df["Open"]) / df["Open"]
     df_feat = df[["Open", "High", "Low", "Close", "Volume", "HL_PCT", "CHG_PCT"]].copy()
 
-    # 归一化
     scaler = MinMaxScaler()
     scaled = scaler.fit_transform(df_feat)
 
     X = scaled[:-1]
     y = scaled[1:, 3]
 
-    rf = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
-    gb = GradientBoostingRegressor(n_estimators=150, learning_rate=0.1, max_depth=5, random_state=42)
-    lr = LinearRegression()
+    model_name = request.model.lower()
 
-    rf.fit(X, y)
-    gb.fit(X, y)
-    lr.fit(X, y)
+    models = {}
 
+    if model_name == "ensemble":
+        models["rf"] = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
+        models["gb"] = GradientBoostingRegressor(n_estimators=150, learning_rate=0.1, max_depth=5, random_state=42)
+        models["lr"] = LinearRegression()
+        if has_xgb:
+            models["xgb"] = XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=4, random_state=42)
+    else:
+        if model_name == "random_forest":
+            models["rf"] = RandomForestRegressor(n_estimators=200, max_depth=10, random_state=42)
+        elif model_name == "gb":
+            models["gb"] = GradientBoostingRegressor(n_estimators=150, learning_rate=0.1, max_depth=5, random_state=42)
+        elif model_name == "linear":
+            models["lr"] = LinearRegression()
+        elif model_name == "xgb":
+            if not has_xgb:
+                raise HTTPException(status_code=400, detail="XGBoost not installed.")
+            models["xgb"] = XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=4, random_state=42)
+        else:
+            raise HTTPException(status_code=400, detail="Invalid model. Use: random_forest, gb, linear, xgb, ensemble")
+
+    # 训练 & 评估
+    preds_train = {}
+    for name, model in models.items():
+        model.fit(X, y)
+        preds_train[name] = model.predict(X)
+
+    # 计算 ensemble 性能
+    if model_name == "ensemble":
+        ensemble_train_pred = np.mean(np.array(list(preds_train.values())), axis=0)
+        r2 = r2_score(y, ensemble_train_pred)
+        mae = mean_absolute_error(y, ensemble_train_pred)
+    else:
+        key = list(models.keys())[0]
+        r2 = r2_score(y, preds_train[key])
+        mae = mean_absolute_error(y, preds_train[key])
+
+    # 滚动预测
     last_row = scaled[-1:]
     preds = []
 
     for _ in range(request.days):
-        rf_pred = rf.predict(last_row)[0]
-        gb_pred = gb.predict(last_row)[0]
-        lr_pred = lr.predict(last_row)[0]
-        avg_pred = np.mean([rf_pred, gb_pred, lr_pred])
+        step_preds = []
+        for model in models.values():
+            step_preds.append(model.predict(last_row)[0])
+        avg_pred = np.mean(step_preds)
         preds.append(avg_pred)
 
         next_row = last_row[0].copy()
@@ -66,4 +105,11 @@ async def predict_stock(request: PredictRequest):
     dummy[:, 3] = preds
     inv_preds = scaler.inverse_transform(dummy)[:, 3]
 
-    return {"predictions": [round(x, 2) for x in inv_preds.tolist()]}
+    return {
+        "predictions": [round(x, 2) for x in inv_preds.tolist()],
+        "metrics": {
+            "model": model_name,
+            "r2": round(r2, 4),
+            "mae": round(mae, 4),
+        }
+    }

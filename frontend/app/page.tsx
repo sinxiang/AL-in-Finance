@@ -18,9 +18,17 @@ interface PredictionDataPoint {
   y: number
 }
 
+interface Metrics {
+  model: string
+  r2: number
+  mae: number
+}
+
 export default function HomePage() {
   const [symbol, setSymbol] = useState("AAPL")
   const [days, setDays] = useState(30)
+  const [model, setModel] = useState("ensemble")
+  const [metrics, setMetrics] = useState<Metrics | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const [chartData, setChartData] = useState<CandleDataPoint[]>([])
@@ -31,12 +39,14 @@ export default function HomePage() {
     try {
       setLoading(true)
       setError("")
+      setMetrics(null)
 
       const [chartRes, predRes] = await Promise.all([
         axios.get(`/api/stock?symbol=${symbol}`),
         axios.post(`https://al-in-finance.onrender.com/api/predict`, {
           symbol,
           days,
+          model,
         }),
       ])
 
@@ -64,13 +74,14 @@ export default function HomePage() {
 
       setChartData(formattedChartData)
       setPredictionData(formattedPredictionData)
+      setMetrics(predRes.data.metrics || null)
     } catch (err) {
       console.error("Error fetching data:", err)
       setError("Failed to fetch stock or prediction data.")
     } finally {
       setLoading(false)
     }
-  }, [symbol, days])
+  }, [symbol, days, model])
 
   useEffect(() => {
     fetchData()
@@ -81,7 +92,7 @@ export default function HomePage() {
       <h1 className="text-3xl font-extrabold text-center text-gray-800">📈 Stock Forecast Dashboard</h1>
 
       <section className="bg-white shadow-lg rounded-2xl p-6 space-y-4">
-        <div className="flex flex-col sm:flex-row items-center gap-4">
+        <div className="flex flex-col sm:flex-row flex-wrap items-center gap-4">
           <Input
             value={symbol}
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
@@ -95,6 +106,17 @@ export default function HomePage() {
             placeholder="Days to Predict"
             className="w-full sm:max-w-xs border-gray-300"
           />
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            className="w-full sm:max-w-xs border-gray-300 rounded-md px-3 py-2 text-sm"
+          >
+            <option value="ensemble">Ensemble (Avg)</option>
+            <option value="random_forest">Random Forest</option>
+            <option value="gb">Gradient Boosting</option>
+            <option value="linear">Linear Regression</option>
+            <option value="xgb">XGBoost</option>
+          </select>
           <Button onClick={fetchData} disabled={loading} className="w-full sm:w-auto">
             {loading ? "Loading..." : "Load"}
           </Button>
@@ -134,15 +156,22 @@ export default function HomePage() {
         <section className="bg-white shadow-md rounded-xl p-6">
           <h2 className="text-lg font-semibold mb-4">🔮 Predicted Close Prices</h2>
           {predictionData.length > 0 ? (
-            <Chart
-              type="line"
-              series={[{ name: "Prediction", data: predictionData }]}
-              options={{
-                chart: { id: "prediction", height: 350 },
-                xaxis: { type: "datetime" },
-                yaxis: { decimalsInFloat: 2 },
-              }}
-            />
+            <>
+              <Chart
+                type="line"
+                series={[{ name: `Prediction (${model})`, data: predictionData }]}
+                options={{
+                  chart: { id: "prediction", height: 350 },
+                  xaxis: { type: "datetime" },
+                  yaxis: { decimalsInFloat: 2 },
+                }}
+              />
+              {metrics && (
+                <div className="text-sm text-gray-600 mt-4">
+                  📊 Model: <b>{metrics.model}</b> | R²: <b>{metrics.r2}</b> | MAE: <b>{metrics.mae}</b>
+                </div>
+              )}
+            </>
           ) : (
             <p className="text-sm text-gray-500">No prediction data</p>
           )}
