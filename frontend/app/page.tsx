@@ -20,13 +20,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 
-ChartJS.register(
-  CategoryScale,
-  TimeScale,
-  LinearScale,
-  Tooltip,
-  Legend
-)
+
 
 type CandleDataPoint = {
   x: Date
