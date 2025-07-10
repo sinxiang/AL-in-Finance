@@ -14,9 +14,13 @@ import {
   PointElement,
 } from "chart.js"
 
+import {
+  CandlestickController,
+  CandlestickElement,
+} from "chartjs-chart-financial"
+
 import { Chart } from "react-chartjs-2"
 import "chartjs-adapter-date-fns"
-import "chartjs-chart-financial" // ✅ 自动注册 candlestick 控件
 
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -31,7 +35,9 @@ ChartJS.register(
   Legend,
   CategoryScale,
   LineElement,
-  PointElement
+  PointElement,
+  CandlestickController,
+  CandlestickElement
 )
 
 type CandleDataPoint = {
