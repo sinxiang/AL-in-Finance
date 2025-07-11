@@ -70,7 +70,7 @@ type MetricInfo = {
   }
 }
 
-export default function StockPage() {
+export default function PredictPage() {
   const [symbol, setSymbol] = useState("AAPL")
   const [days, setDays] = useState(30)
   const [model, setModel] = useState("ensemble")
@@ -132,7 +132,12 @@ export default function StockPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-2xl font-semibold mb-4">📊 Stock Predictor</h1>
+      <h1 className="text-3xl font-bold mb-4 text-gray-800">
+        🔍 Search & 🔮 Predict Stock Data
+      </h1>
+      <p className="text-gray-600 mb-6">
+        Enter a stock symbol to view its historical candlestick chart and (optionally) forecast future prices using different models.
+      </p>
 
       <div className="flex gap-4 flex-wrap mb-6 items-end">
         <div>
@@ -178,7 +183,7 @@ export default function StockPage() {
           <Label htmlFor="show-predict">Show Prediction</Label>
         </div>
         <Button onClick={fetchData} disabled={loading}>
-          {loading ? "Loading..." : "Predict"}
+          {loading ? "Loading..." : "Load"}
         </Button>
       </div>
 
@@ -186,7 +191,7 @@ export default function StockPage() {
 
       {candles.length > 0 && (
         <div className="bg-white p-4 rounded shadow mb-6">
-          <h2 className="text-lg font-medium mb-2">📈 Historical Candlestick</h2>
+          <h2 className="text-lg font-medium mb-2">📊 Historical Candlestick</h2>
           <Chart
             type="candlestick"
             data={{
@@ -207,7 +212,7 @@ export default function StockPage() {
                     d.c > d.o ? "#00b386" : d.c < d.o ? "#ff4d4f" : "#999"
                   ),
                   borderWidth: 1,
-                  barThickness: 5, // 控制蜡烛宽度
+                  barThickness: 5,
                 },
               ],
             }}
