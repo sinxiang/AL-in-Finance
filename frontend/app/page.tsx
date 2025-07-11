@@ -10,7 +10,7 @@ export default function HomePage() {
             <p className="text-gray-600 mb-8">Choose a feature below to get started:</p>
 
             <div className="flex justify-center gap-6">
-                <Link href="/search&predict" className="px-6 py-3 bg-blue-600 text-white rounded shadow">
+                <Link href="/predict" className="px-6 py-3 bg-blue-600 text-white rounded shadow">
                     📈 Stock Prediction
                 </Link>
                 <Link href="/recommend" className="px-6 py-3 bg-green-600 text-white rounded shadow">
