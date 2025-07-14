@@ -172,6 +172,7 @@ export default function PredictPage() {
             <ToggleGroupItem value="gb">GB</ToggleGroupItem>
             <ToggleGroupItem value="xgb">XGB</ToggleGroupItem>
             <ToggleGroupItem value="linear">Linear</ToggleGroupItem>
+            <ToggleGroupItem value="lstm">LSTM</ToggleGroupItem>
           </ToggleGroup>
         </div>
         <div className="flex items-center space-x-2">

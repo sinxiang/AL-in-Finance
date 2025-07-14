@@ -1,12 +1,18 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import List, Optional
 import yfinance as yf
 import numpy as np
+import pandas as pd
+
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
-from xgboost import XGBRegressor
 from sklearn.metrics import r2_score, mean_absolute_error
+import xgboost as xgb
+
+from sklearn.preprocessing import MinMaxScaler
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
 
 router = APIRouter()
 
@@ -16,93 +22,115 @@ class PredictRequest(BaseModel):
     model: Optional[str] = "ensemble"
 
 @router.post("/predict")
-async def predict_stock(payload: PredictRequest):
-    symbol = payload.symbol.upper()
-    days = min(payload.days, 90)  # 限制最大天数
-    model_name = payload.model or "ensemble"
-
-    print(f"[INFO] Predict request: {symbol}, days={days}, model={model_name}")
-
+def predict_stock(req: PredictRequest):
     try:
-        df = yf.download(symbol, period="180d", interval="1d", progress=False)
-        if df.empty:
-            raise HTTPException(status_code=400, detail="No data found.")
+        df = yf.download(req.symbol, period="3mo", interval="1d", progress=False)
+        if df.empty or len(df) < 30:
+            return {"message": "Not enough data for prediction."}
 
-        df.dropna(inplace=True)
-        df["Target"] = df["Close"].shift(-1)
-        df.dropna(inplace=True)
+        df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
-        features = ["Open", "High", "Low", "Close", "Volume"]
-        X = df[features].values
-        y = df["Target"].values
+        if req.model == "lstm":
+            return lstm_predict(df, req.days)
 
-        models = {
-            "random_forest": RandomForestRegressor(n_estimators=100),
-            "gb": GradientBoostingRegressor(),
-            "xgb": XGBRegressor(verbosity=0),
-            "linear": LinearRegression(),
-        }
-
-        preds_all = []
-        metrics_all = []
-
-        used_models = models if model_name == "ensemble" else {model_name: models[model_name]}
-
-        for name, model in used_models.items():
-            print(f"[INFO] Training model: {name}")
-            model.fit(X, y)
-
-            # 滑动窗口预测
-            recent_X = X[-1:]
-            preds = []
-            for _ in range(days):
-                pred = model.predict(recent_X)[0]
-                preds.append(pred)
-                new_row = np.append(recent_X[0][1:], pred).reshape(1, -1)
-                recent_X = np.concatenate([recent_X[:, 1:], [[pred]]], axis=1)
-
-            r2 = r2_score(y, model.predict(X))
-            mae = mean_absolute_error(y, model.predict(X))
-            preds_all.append(preds)
-            metrics_all.append((name, r2, mae))
-
-        # 集成：平均值
-        final_preds = (
-            np.mean(preds_all, axis=0).tolist()
-            if model_name == "ensemble"
-            else preds_all[0]
-        )
-
-        # 最优模型评价
-        model_used = "ensemble" if model_name == "ensemble" else list(used_models.keys())[0]
-        model_r2 = np.mean([m[1] for m in metrics_all])
-        model_mae = np.mean([m[2] for m in metrics_all])
-
-        # 建议逻辑
-        trend = "upward" if final_preds[-1] > final_preds[0] else "downward"
-        risk = "low" if model_mae < 2 else "high"
-        suggestion = (
-            "Likely to rise, consider buying."
-            if trend == "upward" and risk == "low"
-            else "Trend uncertain or risk high, be cautious."
-        )
-
-        print("[INFO] Prediction completed.")
-
-        return {
-            "predictions": final_preds,
-            "metrics": {
-                "model": model_used,
-                "r2": round(model_r2, 4),
-                "mae": round(model_mae, 4),
-            },
-            "advice": {
-                "trend": trend,
-                "risk": risk,
-                "suggestion": suggestion,
-            },
-        }
-
+        return ml_predict(df, req.days, req.model)
     except Exception as e:
-        print("[ERROR]", str(e))
-        raise HTTPException(status_code=500, detail="Prediction failed.")
+        return {"message": f"Prediction failed: {str(e)}"}
+
+def ml_predict(df, days, model_name):
+    X = df[["Open", "High", "Low", "Close", "Volume"]].values[:-1]
+    y = df["Close"].values[1:]
+
+    if model_name == "random_forest":
+        model = RandomForestRegressor()
+    elif model_name == "gb":
+        model = GradientBoostingRegressor()
+    elif model_name == "xgb":
+        model = xgb.XGBRegressor()
+    elif model_name == "linear":
+        model = LinearRegression()
+    else:
+        rf = RandomForestRegressor()
+        gb = GradientBoostingRegressor()
+        lin = LinearRegression()
+        rf.fit(X, y)
+        gb.fit(X, y)
+        lin.fit(X, y)
+        preds = (rf.predict(X) + gb.predict(X) + lin.predict(X)) / 3
+        return format_output(df, preds, y, days)
+
+    model.fit(X, y)
+    preds = model.predict(X)
+    return format_output(df, preds, y, days)
+
+def lstm_predict(df, days):
+    scaler = MinMaxScaler()
+    close_data = df[["Close"]].values
+    scaled_data = scaler.fit_transform(close_data)
+
+    def create_dataset(data, look_back=30):
+        X, y = [], []
+        for i in range(len(data) - look_back):
+            X.append(data[i:i + look_back])
+            y.append(data[i + look_back])
+        return np.array(X), np.array(y)
+
+    look_back = 30
+    X, y = create_dataset(scaled_data, look_back)
+
+    model = Sequential([
+        LSTM(50, input_shape=(look_back, 1)),
+        Dense(1)
+    ])
+    model.compile(optimizer='adam', loss='mse')
+    model.fit(X, y, epochs=20, batch_size=16, verbose=0)
+
+    last_seq = scaled_data[-look_back:]
+    future_preds = []
+    for _ in range(days):
+        pred = model.predict(last_seq.reshape(1, look_back, 1), verbose=0)
+        future_preds.append(pred[0, 0])
+        last_seq = np.append(last_seq[1:], pred, axis=0)
+
+    future_prices = scaler.inverse_transform(np.array(future_preds).reshape(-1, 1)).flatten().tolist()
+    preds = scaler.inverse_transform(model.predict(X, verbose=0)).flatten().tolist()
+    return {
+        "predictions": future_prices,
+        "metrics": {
+            "model": "LSTM",
+            "r2": float(r2_score(close_data[look_back:], preds)),
+            "mae": float(mean_absolute_error(close_data[look_back:], preds))
+        },
+        "advice": generate_advice(future_prices)
+    }
+
+def format_output(df, preds, y, days):
+    model = LinearRegression()
+    model.fit(df[["Open", "High", "Low", "Close", "Volume"]].values, df["Close"].values)
+    last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1]
+    future = []
+    for _ in range(days):
+        pred = model.predict(last_features.reshape(1, -1))[0]
+        future.append(pred)
+        last_features = np.roll(last_features, -1)
+        last_features[-1] = pred
+
+    return {
+        "predictions": future,
+        "metrics": {
+            "model": "Ensemble" if isinstance(preds, np.ndarray) else model.__class__.__name__,
+            "r2": float(r2_score(y, preds)),
+            "mae": float(mean_absolute_error(y, preds))
+        },
+        "advice": generate_advice(future)
+    }
+
+def generate_advice(preds):
+    trend = "Uptrend" if preds[-1] > preds[0] else "Downtrend"
+    risk = "Low" if abs(preds[-1] - preds[0]) / preds[0] < 0.05 else "High"
+    suggestion = "Consider buying." if trend == "Uptrend" and risk == "Low" else "Be cautious."
+    return {
+        "trend": trend,
+        "risk": risk,
+        "suggestion": suggestion
+    }
