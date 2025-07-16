@@ -35,7 +35,7 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     avg_loss = loss.rolling(window=period, min_periods=1).mean()
     rs = avg_gain / (avg_loss + 1e-10)
     rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50)
+    return rsi.fillna(50)  # 中性值填充
 
 def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -43,6 +43,7 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
     df["MA10"] = df["Close"].rolling(window=10, min_periods=1).mean()
     df["MA20"] = df["Close"].rolling(window=20, min_periods=1).mean()
     df["RSI14"] = calculate_rsi(df["Close"], 14)
+    # 先后向填充缺失均线数据
     for col in ["MA5", "MA10", "MA20"]:
         df[col] = df[col].bfill().ffill()
     df["RSI14"] = df["RSI14"].fillna(50)
@@ -51,33 +52,34 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
 @router.post("/predict")
 async def predict_stock(payload: PredictRequest):
     symbol = payload.symbol.upper()
-    days = min(payload.days, 90)
+    days = min(payload.days, 90)  # 限制最大预测天数
     model_name = payload.model or "ensemble"
 
     print(f"[INFO] Predict request: {symbol}, days={days}, model={model_name}")
 
     try:
-        df = yf.download(symbol, period="720d", interval="1d", progress=False)
+        df = yf.download(symbol, period="720d", interval="1d", progress=False, auto_adjust=True)
         if df.empty:
-            raise HTTPException(status_code=400, detail="No data found for symbol.")
+            raise HTTPException(status_code=400, detail="No data found for the symbol.")
+        if "Close" not in df.columns or df["Close"].isnull().all():
+            raise HTTPException(status_code=400, detail="Missing 'Close' data.")
 
         df = calculate_features(df)
-
-        if "Close" not in df.columns or df["Close"].isnull().all():
-            raise HTTPException(status_code=400, detail="Data missing 'Close' values.")
-
         df["Target"] = df["Close"].shift(-1)
 
-        # ✅ 必要防护：确认 Target 存在且不全为空
-        if "Target" not in df.columns or df["Target"].isnull().all():
-            raise HTTPException(status_code=400, detail="Not enough data for prediction target.")
+        if "Target" not in df.columns:
+            raise HTTPException(status_code=400, detail="Failed to create Target column.")
 
-        df.dropna(subset=["Target"], inplace=True)
+        df = df.dropna(subset=["Target"])
 
         features = ["Open", "High", "Low", "Close", "Volume", "MA5", "MA10", "MA20", "RSI14"]
 
-        if not all(f in df.columns for f in features):
-            raise HTTPException(status_code=400, detail="Missing required features after processing.")
+        # 检查所有特征是否存在且无全部为NaN
+        for feature in features:
+            if feature not in df.columns:
+                raise HTTPException(status_code=400, detail=f"Feature '{feature}' not found in data.")
+            if df[feature].isnull().all():
+                raise HTTPException(status_code=400, detail=f"Feature '{feature}' contains all NaN values.")
 
         X = df[features].values
         y = df["Target"].values
@@ -89,42 +91,44 @@ async def predict_stock(payload: PredictRequest):
             "linear": LinearRegression(),
         }
 
-        preds_all = []
-        metrics_all = []
+        if model_name != "ensemble" and model_name not in models:
+            raise HTTPException(status_code=400, detail=f"Model '{model_name}' not supported.")
 
         used_models = models if model_name == "ensemble" else {model_name: models[model_name]}
 
-        window_len = 60
+        window_len = 60  # 滑动窗口长度
+
+        preds_all = []
+        metrics_all = []
+
         for name, model in used_models.items():
             print(f"[INFO] Training model: {name}")
             model.fit(X, y)
 
             sliding_window = df.tail(window_len).copy().reset_index(drop=True)
-
             preds = []
+
             for _ in range(days):
                 input_features = sliding_window[features].iloc[-1].values.reshape(1, -1)
-                fill_value = np.nanmean(sliding_window[features].values.flatten())
-                if np.isnan(fill_value):
-                    fill_value = 0.0
-                input_features = np.nan_to_num(input_features, nan=fill_value)
+                # 处理可能的 NaN
+                nan_fill_value = np.nanmean(sliding_window[features].values.flatten())
+                input_features = np.nan_to_num(input_features, nan=nan_fill_value)
 
                 pred = model.predict(input_features)[0]
                 preds.append(float(pred))
 
-                new_row = {
-                    "Open": pred,
-                    "High": pred,
-                    "Low": pred,
-                    "Close": pred,
+                new_row_df = pd.DataFrame([{
+                    "Open": float(pred),
+                    "High": float(pred),
+                    "Low": float(pred),
+                    "Close": float(pred),
                     "Volume": sliding_window["Volume"].iloc[-1],
-                }
+                }])
 
-                sliding_window = pd.concat([sliding_window, pd.DataFrame([new_row])], ignore_index=True)
+                sliding_window = pd.concat([sliding_window, new_row_df], ignore_index=True)
                 sliding_window = calculate_features(sliding_window)
-
                 if len(sliding_window) > window_len:
-                    sliding_window = sliding_window.iloc[-window_len:].reset_index(drop=True)
+                    sliding_window = sliding_window.iloc[-window_len:].copy().reset_index(drop=True)
 
             r2 = r2_score(y, model.predict(X))
             mae = mean_absolute_error(y, model.predict(X))
