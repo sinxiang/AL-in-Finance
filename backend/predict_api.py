@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 import yfinance as yf
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
@@ -39,7 +39,7 @@ async def predict_stock(payload: PredictRequest):
         models = {
             "random_forest": RandomForestRegressor(n_estimators=100),
             "gb": GradientBoostingRegressor(),
-            "xgb": XGBRegressor(verbosity=0),
+            "xgb": XGBRegressor(objective='reg:squarederror', verbosity=0),
             "linear": LinearRegression(),
         }
 
@@ -52,33 +52,40 @@ async def predict_stock(payload: PredictRequest):
             print(f"[INFO] Training model: {name}")
             model.fit(X, y)
 
-            # 滑动窗口预测
-            recent_X = X[-1:]
+            recent_X = X[-1:].copy()  # 形状 (1, 5)
             preds = []
+
             for _ in range(days):
                 pred = model.predict(recent_X)[0]
                 preds.append(pred)
-                new_row = np.append(recent_X[0][1:], pred).reshape(1, -1)
-                recent_X = np.concatenate([recent_X[:, 1:], [[pred]]], axis=1)
+
+                # 构造下一条输入，保持特征维度5
+                # 这里用预测值pred作为 Open，High, Low, Close, Volume 用最近一条数据的相应值
+                new_row = np.array([
+                    pred,           # Open 用预测值，也可以根据业务调整
+                    recent_X[0][1], # High
+                    recent_X[0][2], # Low
+                    recent_X[0][3], # Close
+                    recent_X[0][4], # Volume
+                ]).reshape(1, -1)
+
+                recent_X = new_row
 
             r2 = r2_score(y, model.predict(X))
             mae = mean_absolute_error(y, model.predict(X))
             preds_all.append(preds)
             metrics_all.append((name, r2, mae))
 
-        # 集成：平均值
         final_preds = (
             np.mean(preds_all, axis=0).tolist()
             if model_name == "ensemble"
             else preds_all[0]
         )
 
-        # 最优模型评价
         model_used = "ensemble" if model_name == "ensemble" else list(used_models.keys())[0]
         model_r2 = np.mean([m[1] for m in metrics_all])
         model_mae = np.mean([m[2] for m in metrics_all])
 
-        # 建议逻辑
         trend = "upward" if final_preds[-1] > final_preds[0] else "downward"
         risk = "low" if model_mae < 2 else "high"
         suggestion = (
