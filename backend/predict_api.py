@@ -63,11 +63,11 @@ def ml_predict(df, days, model_name):
         preds_lin = lin.predict(X)
         preds = (preds_rf + preds_gb + preds_lin) / 3
 
-        return format_output(df, preds, y, days)
+        return format_output(df, preds, y, days, "Ensemble")
 
     model.fit(X, y)
     preds = model.predict(X)
-    return format_output(df, preds, y, days)
+    return format_output(df, preds, y, days, model_name)
 
 def lstm_predict(df, days):
     scaler = MinMaxScaler()
@@ -117,28 +117,23 @@ def lstm_predict(df, days):
         "advice": generate_advice(future_prices.tolist())
     }
 
-def format_output(df, preds, y, days):
-    X_hist = df[["Open", "High", "Low", "Close", "Volume"]].values[:-1]
-    y_hist = df["Close"].values[1:]
-
-    model = LinearRegression()
-    model.fit(X_hist, y_hist)
-    preds_hist = model.predict(X_hist)
-
+def format_output(df, preds, y, days, model_name):
     last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1]
     future = []
+    model_for_future = LinearRegression()
+    model_for_future.fit(df[["Open", "High", "Low", "Close", "Volume"]].values[:-1], df["Close"].values[1:])
     for _ in range(days):
-        pred = model.predict(last_features.reshape(1, -1))[0]
-        future.append(pred)
+        pred = model_for_future.predict(last_features.reshape(1, -1))[0]
+        future.append(float(pred))
         last_features = np.roll(last_features, -1)
         last_features[-1] = pred
 
     return {
         "predictions": future,
         "metrics": {
-            "model": "Ensemble" if isinstance(preds, np.ndarray) else model.__class__.__name__,
-            "r2": float(r2_score(y_hist, preds_hist)),
-            "mae": float(mean_absolute_error(y_hist, preds_hist))
+            "model": model_name,
+            "r2": float(r2_score(y, preds)),
+            "mae": float(mean_absolute_error(y, preds))
         },
         "advice": generate_advice(future)
     }
