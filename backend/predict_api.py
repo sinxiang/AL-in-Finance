@@ -63,13 +63,24 @@ def ml_predict(df, days, model_name):
         preds_rf = rf.predict(X)
         preds_gb = gb.predict(X)
         preds_lin = lin.predict(X)
+
+        # Debug: length check
+        print(f"Lengths - y: {len(y)}, RF preds: {len(preds_rf)}, GB preds: {len(preds_gb)}, Lin preds: {len(preds_lin)}")
+        assert len(preds_rf) == len(y)
+        assert len(preds_gb) == len(y)
+        assert len(preds_lin) == len(y)
+
         preds = (preds_rf + preds_gb + preds_lin) / 3
 
         return format_output(df, preds, y, days, "Ensemble")
 
     model.fit(X, y)
     preds = model.predict(X)
+    print(f"Lengths - y: {len(y)}, preds: {len(preds)}")
+    assert len(preds) == len(y)
+
     return format_output(df, preds, y, days, model_name)
+
 
 def lstm_predict(df, days):
     scaler = MinMaxScaler()
@@ -126,6 +137,16 @@ def lstm_predict(df, days):
 
 
 def format_output(df, preds, y, days, model_name):
+    # 先计算历史的 r2 和 mae
+    try:
+        r2 = float(r2_score(y, preds))
+        mae = float(mean_absolute_error(y, preds))
+    except Exception as e:
+        print(f"Metric calculation error: {str(e)}")
+        r2 = None
+        mae = None
+
+    # 再预测未来
     last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1]
     future = []
     model_for_future = LinearRegression()
@@ -140,11 +161,12 @@ def format_output(df, preds, y, days, model_name):
         "predictions": future,
         "metrics": {
             "model": model_name,
-            "r2": float(r2_score(y, preds)),
-            "mae": float(mean_absolute_error(y, preds))
+            "r2": r2,
+            "mae": mae
         },
         "advice": generate_advice(future)
     }
+
 
 def generate_advice(preds):
     trend = "Uptrend" if preds[-1] > preds[0] else "Downtrend"
