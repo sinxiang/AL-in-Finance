@@ -50,7 +50,6 @@ def ml_predict(df, days, model_name):
     elif model_name == "linear":
         model = LinearRegression()
     else:
-        # Ensemble average of RF, GB, Linear
         rf = RandomForestRegressor()
         gb = GradientBoostingRegressor()
         lin = LinearRegression()
@@ -101,7 +100,6 @@ def lstm_predict(df, days):
 
     future_prices = scaler.inverse_transform(np.array(future_preds).reshape(-1, 1)).flatten()
 
-    # 预测训练集结果用于计算指标，注意保持 numpy array 类型且长度匹配
     preds_scaled = model.predict(X, verbose=0).flatten()
     preds = scaler.inverse_transform(preds_scaled.reshape(-1, 1)).flatten()
     true_vals = close_data[look_back:].flatten()
@@ -120,8 +118,13 @@ def lstm_predict(df, days):
     }
 
 def format_output(df, preds, y, days):
+    X_hist = df[["Open", "High", "Low", "Close", "Volume"]].values[:-1]
+    y_hist = df["Close"].values[1:]
+
     model = LinearRegression()
-    model.fit(df[["Open", "High", "Low", "Close", "Volume"]].values, df["Close"].values)
+    model.fit(X_hist, y_hist)
+    preds_hist = model.predict(X_hist)
+
     last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1]
     future = []
     for _ in range(days):
@@ -134,8 +137,8 @@ def format_output(df, preds, y, days):
         "predictions": future,
         "metrics": {
             "model": "Ensemble" if isinstance(preds, np.ndarray) else model.__class__.__name__,
-            "r2": float(r2_score(y, preds)),
-            "mae": float(mean_absolute_error(y, preds))
+            "r2": float(r2_score(y_hist, preds_hist)),
+            "mae": float(mean_absolute_error(y_hist, preds_hist))
         },
         "advice": generate_advice(future)
     }
