@@ -87,7 +87,7 @@ def lstm_predict(df, days):
     X, y = create_dataset(scaled_data, look_back)
 
     if len(X) == 0:
-        return {"message": "Not enough data after processing for LSTM."}
+        return {"message": "Not enough data after windowing for LSTM."}
 
     model = Sequential([
         LSTM(50, input_shape=(look_back, 1)),
@@ -98,9 +98,9 @@ def lstm_predict(df, days):
 
     preds_scaled = model.predict(X, verbose=0).flatten()
 
-    # ✅ 正确写法：y 和 preds_scaled 长度完全一致
-    true_vals = scaler.inverse_transform(y.reshape(-1, 1)).flatten()
     preds = scaler.inverse_transform(preds_scaled.reshape(-1, 1)).flatten()
+
+    true_vals = close_data[look_back:look_back + len(preds)]
 
     r2 = float(r2_score(true_vals, preds))
     mae = float(mean_absolute_error(true_vals, preds))
