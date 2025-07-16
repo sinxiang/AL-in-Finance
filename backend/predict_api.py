@@ -35,17 +35,17 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     avg_loss = loss.rolling(window=period, min_periods=1).mean()
     rs = avg_gain / (avg_loss + 1e-10)
     rsi = 100 - (100 / (1 + rs))
-    rsi = rsi.fillna(50)  # 中性值填充
+    rsi = rsi.fillna(50)  # 填充中性值
     return rsi
 
 def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    # 计算均线
+    # 计算移动均线，允许最小period减少以避免丢失数据
     df["MA5"] = df["Close"].rolling(window=5, min_periods=1).mean()
     df["MA10"] = df["Close"].rolling(window=10, min_periods=1).mean()
     df["MA20"] = df["Close"].rolling(window=20, min_periods=1).mean()
     df["RSI14"] = calculate_rsi(df["Close"], 14)
-    # 填充缺失值：先后向填充，再用中性值填充
+    # 前后填充缺失值
     for col in ["MA5", "MA10", "MA20"]:
         df[col] = df[col].bfill().ffill()
     df["RSI14"] = df["RSI14"].fillna(50)
@@ -60,17 +60,22 @@ async def predict_stock(payload: PredictRequest):
     print(f"[INFO] Predict request: {symbol}, days={days}, model={model_name}")
 
     try:
-        # 下载数据720天
-        df = yf.download(symbol, period="720d", interval="1d", progress=False)
+        # 下载数据720天，关闭auto_adjust防止价格数据调整
+        df = yf.download(symbol, period="720d", interval="1d", progress=False, auto_adjust=False)
         if df.empty:
             raise HTTPException(status_code=400, detail="No data found.")
 
+        # 计算技术指标特征
         df = calculate_features(df)
+
+        # 创建Target列为下一个交易日的Close价格
         df["Target"] = df["Close"].shift(-1)
+        # 删除Target缺失的行
         df.dropna(subset=["Target"], inplace=True)
 
         features = ["Open", "High", "Low", "Close", "Volume", "MA5", "MA10", "MA20", "RSI14"]
 
+        # 训练特征和目标
         X = df[features].values
         y = df["Target"].values
 
@@ -86,28 +91,29 @@ async def predict_stock(payload: PredictRequest):
 
         used_models = models if model_name == "ensemble" else {model_name: models[model_name]}
 
-        window_len = 60  # 滑动窗口长度，保证特征计算足够
+        window_len = 60  # 滑动窗口长度
 
         for name, model in used_models.items():
             print(f"[INFO] Training model: {name}")
             model.fit(X, y)
 
-            # 预测阶段用滑动窗口缓存最近数据，长度为 window_len
+            # 初始化滑动窗口缓存，保留最近window_len条数据
             sliding_window = df.tail(window_len).copy().reset_index(drop=True)
 
             preds = []
 
             for _ in range(days):
-                # 取最后一天的特征
                 input_features = sliding_window[features].iloc[-1].values.reshape(1, -1)
-                # 处理可能存在的nan，整体flatten后算均值填充
-                nan_fill_value = np.nanmean(sliding_window[features].values.flatten())
+
+                # 使用滑动窗口所有值均值替代输入中的nan
+                flat_vals = sliding_window[features].values.flatten()
+                nan_fill_value = np.nanmean(flat_vals)
                 input_features = np.nan_to_num(input_features, nan=nan_fill_value)
 
                 pred = model.predict(input_features)[0]
                 preds.append(float(pred))
 
-                # 用预测结果构造新行，注意保持数据类型一致
+                # 构建新行，Open/High/Low/Close 均用预测值，Volume沿用前一行
                 new_row_df = pd.DataFrame([{
                     "Open": float(pred),
                     "High": float(pred),
@@ -116,20 +122,21 @@ async def predict_stock(payload: PredictRequest):
                     "Volume": sliding_window["Volume"].iloc[-1],
                 }])
 
-                # 添加新行到滑动窗口尾部
+                # 拼接新行
                 sliding_window = pd.concat([sliding_window, new_row_df], ignore_index=True)
 
-                # 重新计算特征，保持滑动窗口大小
+                # 重新计算特征，保证滑动窗口长度不变
                 sliding_window = calculate_features(sliding_window)
                 if len(sliding_window) > window_len:
                     sliding_window = sliding_window.iloc[-window_len:].copy().reset_index(drop=True)
 
+            # 计算模型指标
             r2 = r2_score(y, model.predict(X))
             mae = mean_absolute_error(y, model.predict(X))
             metrics_all.append((name, float(r2), float(mae)))
             preds_all.append(preds)
 
-        # 合成最终预测结果
+        # 结果融合
         if model_name == "ensemble":
             final_preds = list(map(float, np.mean(preds_all, axis=0)))
             model_used = "ensemble"
