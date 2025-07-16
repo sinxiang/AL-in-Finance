@@ -9,6 +9,7 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from xgboost import XGBRegressor
 from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.preprocessing import MinMaxScaler  # ✅ 新增导入
 
 app = FastAPI()
 
@@ -28,11 +29,6 @@ class PredictRequest(BaseModel):
     model: Optional[str] = "ensemble"  # 模型选择
 
 def create_sliding_window_features(df: pd.DataFrame, features: list, window_size: int):
-    """
-    利用过去window_size天的特征构造多维输入矩阵
-    输入：DataFrame，特征名列表，窗口大小
-    输出：二维np数组，每行是过去window_size天所有特征拼接
-    """
     data = df[features].values
     n_samples = len(df) - window_size
     if n_samples <= 0:
@@ -49,48 +45,73 @@ async def predict_stock(payload: PredictRequest):
     symbol = payload.symbol.upper()
     days = min(payload.days, 90)
     model_name = payload.model or "ensemble"
-    window_size = 5  # 滑动窗口大小，可以调整
+    window_size = 10
 
     print(f"[INFO] Predict request: {symbol}, days={days}, model={model_name}")
 
     try:
-        # 下载最近4年数据（大于训练+评估需求）
         df = yf.download(symbol, period="1460d", interval="1d", progress=False)
         if df.empty:
             raise HTTPException(status_code=400, detail="No data found.")
 
         df.dropna(inplace=True)
-        df["MA5"] = df["Close"].rolling(window=5).mean()  # ✅ 只加了这行
+        df["MA5"] = df["Close"].rolling(window=5).mean()
+        df["MA10"] = df["Close"].rolling(window=10).mean()
+        df["MA20"] = df["Close"].rolling(window=20).mean()
+        delta = df["Close"].diff()
+        up = delta.clip(lower=0)
+        down = -1 * delta.clip(upper=0)
+        avg_gain = up.rolling(window=14).mean()
+        avg_loss = down.rolling(window=14).mean()
+        rs = avg_gain / avg_loss
+        df["RSI"] = 100 - (100 / (1 + rs))
+
         df.dropna(inplace=True)
 
-        features = ["Open", "High", "Low", "Close", "Volume", "MA5"]  # ✅ 增加 MA5 到特征列表
+        features = ["Open", "High", "Low", "Close", "Volume", "MA5", "MA10", "MA20", "RSI"]
 
-        # 构造标签，目标是未来1天Close价格
         df["Target"] = df["Close"].shift(-1)
-        df.dropna(inplace=True)  # 去掉最后一天，因为Target为NaN
+        df.dropna(inplace=True)
 
-        # 整体数据长度
         total_len = len(df)
         if total_len <= window_size + days:
             raise HTTPException(status_code=400, detail="Not enough data for requested prediction days and window size.")
 
-        # 训练数据用最近3年（约756个交易日）
         train_len = 756
         if train_len > total_len:
-            train_len = total_len - days - window_size  # 保证够预测和窗口
+            train_len = total_len - days - window_size
         df_train = df.iloc[:train_len].reset_index(drop=True)
 
-        # 构造训练集特征和标签
-        X_train = create_sliding_window_features(df_train, features, window_size)
-        y_train = df_train["Target"].values[window_size:]
+        # 训练特征归一化
+        scaler = MinMaxScaler()
+        scaler.fit(df_train[features])
 
-        # 评估用最近1年数据(约252个交易日)
+        df_train_scaled = df_train.copy()
+        df_train_scaled[features] = scaler.transform(df_train[features])
+
+        # 训练标签也归一化（只归一化Close列，目标是Close的下一天，所以标签也要归一化）
+        target_scaler = MinMaxScaler()
+        y_train_close = df_train[["Target"]].values  # shape (n,1)
+        target_scaler.fit(y_train_close)
+        y_train_scaled = target_scaler.transform(y_train_close).flatten()
+
+        # 构造训练特征和标签（滑动窗口）
+        X_train = create_sliding_window_features(df_train_scaled, features, window_size)
+        y_train = y_train_scaled[window_size:]  # 对应标签滑动窗口后剔除window_size
+
         eval_len = 252
         if train_len + eval_len + days > total_len:
             eval_len = total_len - train_len - days
         df_eval = df.iloc[train_len:train_len + eval_len].reset_index(drop=True)
-        X_eval = create_sliding_window_features(df_eval, features, window_size)
-        y_eval = df_eval["Target"].values[window_size:]
+
+        df_eval_scaled = df_eval.copy()
+        df_eval_scaled[features] = scaler.transform(df_eval[features])
+
+        y_eval_close = df_eval[["Target"]].values
+        y_eval_scaled = target_scaler.transform(y_eval_close).flatten()
+
+        X_eval = create_sliding_window_features(df_eval_scaled, features, window_size)
+        y_eval = y_eval_scaled[window_size:]
 
         models = {
             "random_forest": RandomForestRegressor(n_estimators=100, random_state=42),
@@ -110,31 +131,51 @@ async def predict_stock(payload: PredictRequest):
             print(f"[INFO] Training model: {name}")
             model.fit(X_train, y_train)
 
-            # 评估指标计算
-            y_pred_eval = model.predict(X_eval)
-            r2 = r2_score(y_eval, y_pred_eval)
-            mae = mean_absolute_error(y_eval, y_pred_eval)
+            y_pred_eval_scaled = model.predict(X_eval)
+            # 评估指标计算时，将预测和真实标签反归一化再评估更合理
+            y_pred_eval = target_scaler.inverse_transform(y_pred_eval_scaled.reshape(-1,1)).flatten()
+            y_eval_real = target_scaler.inverse_transform(y_eval.reshape(-1,1)).flatten()
+            r2 = r2_score(y_eval_real, y_pred_eval)
+            mae = mean_absolute_error(y_eval_real, y_pred_eval)
 
-            # 递归预测未来days天
             preds = []
-            # 取训练集最后window_size天数据特征做预测输入
-            last_days_data = df.iloc[train_len - window_size:train_len][features].values.flatten()
-            input_feat = last_days_data.reshape(1, -1)  # 1行多列
+            # 初始输入特征为训练集最后window_size天（归一化）
+            last_days_data = df_train_scaled.iloc[train_len - window_size:train_len][features].values.flatten()
+            input_feat = last_days_data.reshape(1, -1)
 
             for _ in range(days):
-                pred = model.predict(input_feat)[0]
-                preds.append(float(pred))
+                pred_scaled = model.predict(input_feat)[0]  # 预测归一化的Target值
+                # 逆归一化成真实股价
+                pred_real = target_scaler.inverse_transform([[pred_scaled]])[0,0]
+                preds.append(pred_real)
 
-                # 更新输入特征，剔除最旧一天，添加预测一天的6个特征
-                # 用预测值填充Open/High/Low/Close/MA5，Volume继续用最后一个
-                new_feat = np.array([pred, pred, pred, pred, input_feat[0, -2], pred])
+                # 取当前输入特征最后一天的归一化特征（用于保留Volume和计算技术指标）
+                last_day_features = input_feat[0, -len(features):]
+
+                # Volume保持不变，直接取最后一天的归一化Volume
+                last_volume_scaled = last_day_features[4]
+
+                # 技术指标MA5, MA10, MA20, RSI 用前一天的技术指标值（last_day_features中对应位置）
+                # Open, High, Low, Close 用预测的归一化Close值（pred_scaled）
+                new_feat_scaled = np.array([
+                    pred_scaled,        # Open
+                    pred_scaled,        # High
+                    pred_scaled,        # Low
+                    pred_scaled,        # Close
+                    last_volume_scaled,  # Volume
+                    last_day_features[5],  # MA5
+                    last_day_features[6],  # MA10
+                    last_day_features[7],  # MA20
+                    last_day_features[8],  # RSI
+                ])
+
+                # 滚动窗口左移
                 input_feat = np.roll(input_feat, -len(features))
-                input_feat[0, -len(features):] = new_feat
+                input_feat[0, -len(features):] = new_feat_scaled
 
             preds_all.append(preds)
             metrics_all.append((name, r2, mae))
 
-        # 集成模型预测取均值
         if model_name == "ensemble":
             final_preds = np.mean(preds_all, axis=0).tolist()
         else:
