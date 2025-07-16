@@ -60,7 +60,10 @@ async def predict_stock(payload: PredictRequest):
             raise HTTPException(status_code=400, detail="No data found.")
 
         df.dropna(inplace=True)
-        features = ["Open", "High", "Low", "Close", "Volume"]
+        df["MA5"] = df["Close"].rolling(window=5).mean()  # ✅ 只加了这行
+        df.dropna(inplace=True)
+
+        features = ["Open", "High", "Low", "Close", "Volume", "MA5"]  # ✅ 增加 MA5 到特征列表
 
         # 构造标签，目标是未来1天Close价格
         df["Target"] = df["Close"].shift(-1)
@@ -122,9 +125,9 @@ async def predict_stock(payload: PredictRequest):
                 pred = model.predict(input_feat)[0]
                 preds.append(float(pred))
 
-                # 更新输入特征，剔除最旧一天，添加预测一天的5个特征
-                # 这里简单用预测值填充Open/High/Low/Close，Volume用前一天Volume（最后一个Volume）
-                new_feat = np.array([pred, pred, pred, pred, input_feat[0, -1]])
+                # 更新输入特征，剔除最旧一天，添加预测一天的6个特征
+                # 用预测值填充Open/High/Low/Close/MA5，Volume继续用最后一个
+                new_feat = np.array([pred, pred, pred, pred, input_feat[0, -2], pred])
                 input_feat = np.roll(input_feat, -len(features))
                 input_feat[0, -len(features):] = new_feat
 
