@@ -81,10 +81,7 @@ def lstm_predict(df, days):
         for i in range(len(data) - look_back):
             X.append(data[i:i + look_back])
             y.append(data[i + look_back])
-        X_np = np.array(X)
-        y_np = np.array(y)
-        print(f"create_dataset - X shape: {X_np.shape}, y shape: {y_np.shape}")
-        return X_np, y_np
+        return np.array(X), np.array(y)
 
     look_back = 30
     X, y = create_dataset(scaled_data, look_back)
@@ -97,16 +94,11 @@ def lstm_predict(df, days):
     model.fit(X, y, epochs=20, batch_size=16, verbose=0)
 
     preds_scaled = model.predict(X, verbose=0).flatten()
-    print(f"Predictions shape (preds_scaled): {preds_scaled.shape}")
-    print(f"True values shape (y): {y.shape}")
 
-    if preds_scaled.shape[0] != y.shape[0]:
-        error_msg = f"Length mismatch: preds_scaled={preds_scaled.shape[0]}, y={y.shape[0]}"
-        print(error_msg)
-        return {"message": error_msg}
+    # ✅ 重点修正：确保 true_vals 和 preds 长度一致
+    true_vals = close_data[look_back:look_back + len(preds_scaled)].flatten()
 
     preds = scaler.inverse_transform(preds_scaled.reshape(-1, 1)).flatten()
-    true_vals = close_data[look_back:].flatten()
 
     r2 = float(r2_score(true_vals, preds))
     mae = float(mean_absolute_error(true_vals, preds))
