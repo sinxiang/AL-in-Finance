@@ -21,7 +21,8 @@ def health_check():
     return {"status": "ok"}
 
 # 挂载你自己的预测路由
-app.include_router(router)
+app.include_router(router, prefix="/api")
+
 
 if __name__ == "__main__":
     import uvicorn
