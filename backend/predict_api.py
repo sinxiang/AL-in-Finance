@@ -11,10 +11,10 @@ from sklearn.metrics import r2_score, mean_absolute_error
 
 app = FastAPI()
 
-# 允许所有来源跨域访问，生产环境请根据需要限制域名
+# CORS 中间件，允许跨域
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],  # 可根据需要替换为你的前端域名
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,7 +30,7 @@ class PredictRequest(BaseModel):
 @router.post("/predict")
 async def predict_stock(payload: PredictRequest):
     symbol = payload.symbol.upper()
-    days = min(payload.days, 90)  # 限制最大天数
+    days = min(payload.days, 90)
     model_name = payload.model or "ensemble"
 
     print(f"[INFO] Predict request: {symbol}, days={days}, model={model_name}")
@@ -51,7 +51,7 @@ async def predict_stock(payload: PredictRequest):
         models = {
             "random_forest": RandomForestRegressor(n_estimators=100),
             "gb": GradientBoostingRegressor(),
-            "xgb": XGBRegressor(objective='reg:squarederror', verbosity=0),
+            "xgb": XGBRegressor(objective='reg:squarederror', verbosity=0, n_estimators=50),
             "linear": LinearRegression(),
         }
 
@@ -70,7 +70,6 @@ async def predict_stock(payload: PredictRequest):
             for _ in range(days):
                 pred = model.predict(recent_X)[0]
                 preds.append(pred)
-
                 new_row = np.array([
                     pred,
                     recent_X[0][1],
@@ -78,7 +77,6 @@ async def predict_stock(payload: PredictRequest):
                     recent_X[0][3],
                     recent_X[0][4],
                 ]).reshape(1, -1)
-
                 recent_X = new_row
 
             r2 = r2_score(y, model.predict(X))
@@ -92,9 +90,12 @@ async def predict_stock(payload: PredictRequest):
             else preds_all[0]
         )
 
+        # 强制转换为 Python float，避免 JSON 序列化错误
+        final_preds = [float(p) for p in final_preds]
+
         model_used = "ensemble" if model_name == "ensemble" else list(used_models.keys())[0]
-        model_r2 = np.mean([m[1] for m in metrics_all])
-        model_mae = np.mean([m[2] for m in metrics_all])
+        model_r2 = float(np.mean([m[1] for m in metrics_all]))
+        model_mae = float(np.mean([m[2] for m in metrics_all]))
 
         trend = "upward" if final_preds[-1] > final_preds[0] else "downward"
         risk = "low" if model_mae < 2 else "high"
@@ -121,7 +122,9 @@ async def predict_stock(payload: PredictRequest):
         }
 
     except Exception as e:
-        print("[ERROR]", str(e))
-        raise HTTPException(status_code=500, detail="Prediction failed.")
+        import traceback
+        print("[ERROR] Exception occurred:")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 app.include_router(router, prefix="/api")
