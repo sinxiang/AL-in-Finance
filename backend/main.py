@@ -1,22 +1,29 @@
+# main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from predict_api import router as predict_router
+import os
+
+from predict_api import router  # 这里导入你刚发的那个 router
 
 app = FastAPI()
 
-# ✅ 配置跨域允许（推荐指定你的前端地址）
+# 跨域配置，允许所有来源（生产环境建议限制具体域名）
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://al-in-finance.vercel.app", "http://localhost:3000"],  # 或 ["*"] 临时全放开
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ✅ 注册后端接口路由
-app.include_router(predict_router, prefix="/api")
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
-# ✅ 健康检查接口
-@app.get("/")
-def root():
-    return {"message": "Backend is running."}
+# 挂载你自己的预测路由
+app.include_router(router)
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)

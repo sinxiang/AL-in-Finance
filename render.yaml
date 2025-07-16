@@ -1,10 +1,9 @@
 services:
   - type: web
-    name: stock-predict-backend
+    name: al-in-finance-api
     env: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: PORT
-        value: 10000
-    plan: free
+        value: "10000"   # Render 默认端口，你也可以留空让Render自动设置
