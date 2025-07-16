@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional
 import yfinance as yf
 import numpy as np
+import pandas as pd
 
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
@@ -23,6 +24,7 @@ class PredictRequest(BaseModel):
 @router.post("/predict")
 def predict_stock(req: PredictRequest):
     try:
+        print(f"Received prediction request: symbol={req.symbol}, days={req.days}, model={req.model}")
         df = yf.download(req.symbol, period="3mo", interval="1d", progress=False)
         if df.empty or len(df) < 30:
             return {"message": "Not enough data for prediction."}
@@ -34,6 +36,7 @@ def predict_stock(req: PredictRequest):
 
         return ml_predict(df, req.days, req.model)
     except Exception as e:
+        print(f"Prediction error: {str(e)}")
         return {"message": f"Prediction failed: {str(e)}"}
 
 def ml_predict(df, days, model_name):
@@ -49,7 +52,6 @@ def ml_predict(df, days, model_name):
     elif model_name == "linear":
         model = LinearRegression()
     else:
-        # Ensemble model
         rf = RandomForestRegressor()
         gb = GradientBoostingRegressor()
         lin = LinearRegression()
@@ -79,7 +81,10 @@ def lstm_predict(df, days):
         for i in range(len(data) - look_back):
             X.append(data[i:i + look_back])
             y.append(data[i + look_back])
-        return np.array(X), np.array(y)
+        X_np = np.array(X)
+        y_np = np.array(y)
+        print(f"create_dataset - X shape: {X_np.shape}, y shape: {y_np.shape}")
+        return X_np, y_np
 
     look_back = 30
     X, y = create_dataset(scaled_data, look_back)
@@ -91,6 +96,21 @@ def lstm_predict(df, days):
     model.compile(optimizer='adam', loss='mse')
     model.fit(X, y, epochs=20, batch_size=16, verbose=0)
 
+    preds_scaled = model.predict(X, verbose=0).flatten()
+    print(f"Predictions shape (preds_scaled): {preds_scaled.shape}")
+    print(f"True values shape (y): {y.shape}")
+
+    if preds_scaled.shape[0] != y.shape[0]:
+        error_msg = f"Length mismatch: preds_scaled={preds_scaled.shape[0]}, y={y.shape[0]}"
+        print(error_msg)
+        return {"message": error_msg}
+
+    preds = scaler.inverse_transform(preds_scaled.reshape(-1, 1)).flatten()
+    true_vals = close_data[look_back:].flatten()
+
+    r2 = float(r2_score(true_vals, preds))
+    mae = float(mean_absolute_error(true_vals, preds))
+
     last_seq = scaled_data[-look_back:]
     future_preds = []
     for _ in range(days):
@@ -99,13 +119,6 @@ def lstm_predict(df, days):
         last_seq = np.append(last_seq[1:], pred, axis=0)
 
     future_prices = scaler.inverse_transform(np.array(future_preds).reshape(-1, 1)).flatten()
-
-    preds_scaled = model.predict(X, verbose=0).flatten()
-    preds = scaler.inverse_transform(preds_scaled.reshape(-1, 1)).flatten()
-    true_vals = close_data[look_back:].flatten()
-
-    r2 = float(r2_score(true_vals, preds))
-    mae = float(mean_absolute_error(true_vals, preds))
 
     return {
         "predictions": future_prices.tolist(),
@@ -118,19 +131,13 @@ def lstm_predict(df, days):
     }
 
 def format_output(df, preds, y, days, model_name):
-    # 用最后一条完整数据做未来特征初始值
-    last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1].copy()
-
-    model_for_future = LinearRegression()
-    X_hist = df[["Open", "High", "Low", "Close", "Volume"]].values[:-1]
-    y_hist = df["Close"].values[1:]
-    model_for_future.fit(X_hist, y_hist)
-
+    last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1]
     future = []
+    model_for_future = LinearRegression()
+    model_for_future.fit(df[["Open", "High", "Low", "Close", "Volume"]].values[:-1], df["Close"].values[1:])
     for _ in range(days):
         pred = model_for_future.predict(last_features.reshape(1, -1))[0]
         future.append(float(pred))
-        # 将预测的收盘价放进特征数组最后一位，往前滚动模拟更新
         last_features = np.roll(last_features, -1)
         last_features[-1] = pred
 
