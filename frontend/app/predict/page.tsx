@@ -248,11 +248,10 @@ export default function PredictPage() {
           <Chart
             type="line"
             data={{
-              labels: predictions.map((d) => d.x),
               datasets: [
                 {
                   label: "Predicted Close",
-                  data: predictions.map((d) => d.y),
+                  data: predictions.map((d) => ({ x: d.x, y: d.y })),
                   borderColor: "green",
                   fill: false,
                 },

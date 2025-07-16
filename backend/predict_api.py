@@ -3,7 +3,6 @@ from pydantic import BaseModel
 from typing import Optional
 import yfinance as yf
 import numpy as np
-import pandas as pd
 
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
@@ -50,6 +49,7 @@ def ml_predict(df, days, model_name):
     elif model_name == "linear":
         model = LinearRegression()
     else:
+        # Ensemble model
         rf = RandomForestRegressor()
         gb = GradientBoostingRegressor()
         lin = LinearRegression()
@@ -118,13 +118,19 @@ def lstm_predict(df, days):
     }
 
 def format_output(df, preds, y, days, model_name):
-    last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1]
-    future = []
+    # 用最后一条完整数据做未来特征初始值
+    last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1].copy()
+
     model_for_future = LinearRegression()
-    model_for_future.fit(df[["Open", "High", "Low", "Close", "Volume"]].values[:-1], df["Close"].values[1:])
+    X_hist = df[["Open", "High", "Low", "Close", "Volume"]].values[:-1]
+    y_hist = df["Close"].values[1:]
+    model_for_future.fit(X_hist, y_hist)
+
+    future = []
     for _ in range(days):
         pred = model_for_future.predict(last_features.reshape(1, -1))[0]
         future.append(float(pred))
+        # 将预测的收盘价放进特征数组最后一位，往前滚动模拟更新
         last_features = np.roll(last_features, -1)
         last_features[-1] = pred
 
