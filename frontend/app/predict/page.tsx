@@ -100,6 +100,9 @@ export default function PredictPage() {
           : Promise.resolve({ data: {} }),
       ])
 
+      console.log("Chart Data:", chartRes.data)
+      console.log("Prediction Data:", predRes.data)
+
       const timestamps: number[] = chartRes.data.chart.result[0].timestamp
       const ohlc = chartRes.data.chart.result[0].indicators.quote[0]
 
@@ -121,12 +124,10 @@ export default function PredictPage() {
           return { x: d, y: Number(val.toFixed(2)) }
         })
         setPredictions(formattedPreds)
-        setMetrics({
-          metrics: predRes.data.metrics,
-          advice: predRes.data.advice,
-        })
+        setMetrics(predRes.data || null)
       }
-    } catch {
+    } catch (err) {
+      console.error("Fetch Error:", err)
       setError("Failed to load data. Please try again.")
     } finally {
       setLoading(false)
@@ -202,7 +203,13 @@ export default function PredictPage() {
               datasets: [
                 {
                   label: "OHLC",
-                  data: candles,
+                  data: candles.map((d) => ({
+                    x: d.x,
+                    o: d.o,
+                    h: d.h,
+                    l: d.l,
+                    c: d.c,
+                  })),
                   borderColor: candles.map((d) =>
                     d.c > d.o ? "#00b386" : d.c < d.o ? "#ff4d4f" : "#999"
                   ),
