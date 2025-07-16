@@ -15,7 +15,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有源
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -36,18 +36,19 @@ def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     avg_loss = loss.rolling(window=period, min_periods=period).mean()
     rs = avg_gain / (avg_loss + 1e-10)
     rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50)  # 用中性值填充前期NA
+    return rsi.fillna(50)
 
 def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["MA5"] = df["Close"].rolling(window=5, min_periods=5).mean()
-    df["MA10"] = df["Close"].rolling(window=10, min_periods=10).mean()
-    df["MA20"] = df["Close"].rolling(window=20, min_periods=20).mean()
+    df["MA5"] = df["Close"].rolling(window=5, min_periods=1).mean()
+    df["MA10"] = df["Close"].rolling(window=10, min_periods=1).mean()
+    df["MA20"] = df["Close"].rolling(window=20, min_periods=1).mean()
     df["RSI14"] = calculate_rsi(df["Close"], 14)
-    # 改用 bfill()，避免 FutureWarning
-    df["MA5"] = df["MA5"].bfill()
-    df["MA10"] = df["MA10"].bfill()
-    df["MA20"] = df["MA20"].bfill()
+
+    # bfill + ffill 填充，避免NaN
+    df["MA5"] = df["MA5"].bfill().ffill()
+    df["MA10"] = df["MA10"].bfill().ffill()
+    df["MA20"] = df["MA20"].bfill().ffill()
     df["RSI14"] = df["RSI14"].fillna(50)
     return df
 
@@ -100,11 +101,12 @@ async def predict_stock(payload: PredictRequest):
             preds = []
 
             for _ in range(days):
-                input_features = sliding_window[features].values[-1].reshape(1, -1)
+                input_features = sliding_window[features].iloc[-1].values.reshape(1, -1)
+                # 防止NaN导致预测报错
+                input_features = np.nan_to_num(input_features, nan=np.nanmean(sliding_window[features].values))
                 pred = model.predict(input_features)[0]
                 preds.append(float(pred))
 
-                # 用 concat 代替 append
                 new_row_df = pd.DataFrame([{
                     "Open": float(pred),
                     "High": float(pred),
