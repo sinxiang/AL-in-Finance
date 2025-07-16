@@ -1,7 +1,8 @@
 fastapi
 uvicorn
-scikit-learn
 yfinance
 numpy
-pandas
+scikit-learn
 xgboost
+pydantic
+pandas

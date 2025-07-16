@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 import yfinance as yf
@@ -7,6 +8,17 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from xgboost import XGBRegressor
 from sklearn.metrics import r2_score, mean_absolute_error
+
+app = FastAPI()
+
+# 允许所有来源跨域访问，生产环境请根据需要限制域名
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 router = APIRouter()
 
@@ -52,21 +64,19 @@ async def predict_stock(payload: PredictRequest):
             print(f"[INFO] Training model: {name}")
             model.fit(X, y)
 
-            recent_X = X[-1:].copy()  # 形状 (1, 5)
+            recent_X = X[-1:].copy()
             preds = []
 
             for _ in range(days):
                 pred = model.predict(recent_X)[0]
                 preds.append(pred)
 
-                # 构造下一条输入，保持特征维度5
-                # 这里用预测值pred作为 Open，High, Low, Close, Volume 用最近一条数据的相应值
                 new_row = np.array([
-                    pred,           # Open 用预测值，也可以根据业务调整
-                    recent_X[0][1], # High
-                    recent_X[0][2], # Low
-                    recent_X[0][3], # Close
-                    recent_X[0][4], # Volume
+                    pred,
+                    recent_X[0][1],
+                    recent_X[0][2],
+                    recent_X[0][3],
+                    recent_X[0][4],
                 ]).reshape(1, -1)
 
                 recent_X = new_row
@@ -113,3 +123,5 @@ async def predict_stock(payload: PredictRequest):
     except Exception as e:
         print("[ERROR]", str(e))
         raise HTTPException(status_code=500, detail="Prediction failed.")
+
+app.include_router(router, prefix="/api")
