@@ -44,11 +44,11 @@ def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
     df["MA10"] = df["Close"].rolling(window=10, min_periods=10).mean()
     df["MA20"] = df["Close"].rolling(window=20, min_periods=20).mean()
     df["RSI14"] = calculate_rsi(df["Close"], 14)
-    # 对缺失的指标用前向填充或中性值处理
-    df["MA5"].fillna(method='bfill', inplace=True)
-    df["MA10"].fillna(method='bfill', inplace=True)
-    df["MA20"].fillna(method='bfill', inplace=True)
-    df["RSI14"].fillna(50, inplace=True)
+    # 改用 bfill()，避免 FutureWarning
+    df["MA5"] = df["MA5"].bfill()
+    df["MA10"] = df["MA10"].bfill()
+    df["MA20"] = df["MA20"].bfill()
+    df["RSI14"] = df["RSI14"].fillna(50)
     return df
 
 @router.post("/predict")
@@ -64,7 +64,6 @@ async def predict_stock(payload: PredictRequest):
         if df.empty:
             raise HTTPException(status_code=400, detail="No data found.")
 
-        # 计算特征列
         df = calculate_features(df)
         df["Target"] = df["Close"].shift(-1)
         df.dropna(inplace=True)
@@ -88,49 +87,42 @@ async def predict_stock(payload: PredictRequest):
         preds_all = []
         metrics_all = []
 
-        # 滑动窗口长度，取20天用于计算技术指标和预测
         window_len = 20
 
         for name, model in used_models.items():
             print(f"[INFO] Training model: {name}")
             model.fit(X, y)
 
-            # 用最后window_len天的数据构造初始窗口，必须保证有足够长度
             if len(df) < window_len:
                 raise HTTPException(status_code=400, detail="Not enough historical data for sliding window.")
 
             sliding_window = df.iloc[-window_len:].copy().reset_index(drop=True)
             preds = []
 
-            for i in range(days):
-                # 取当前滑动窗口特征做预测
+            for _ in range(days):
                 input_features = sliding_window[features].values[-1].reshape(1, -1)
                 pred = model.predict(input_features)[0]
                 preds.append(float(pred))
 
-                # 构造新行（基于预测值）
-                new_row = {
+                # 用 concat 代替 append
+                new_row_df = pd.DataFrame([{
                     "Open": float(pred),
                     "High": float(pred),
                     "Low": float(pred),
                     "Close": float(pred),
-                    "Volume": sliding_window["Volume"].iloc[-1],  # 复用最后一天成交量
-                }
-                # 用上一次滑动窗口末尾数据append新行，方便指标计算
-                temp_df = sliding_window.append(new_row, ignore_index=True)
+                    "Volume": sliding_window["Volume"].iloc[-1],
+                }])
+                sliding_window = pd.concat([sliding_window, new_row_df], ignore_index=True)
 
-                # 重新计算特征，只计算新行的指标
-                temp_df = calculate_features(temp_df)
-                sliding_window = temp_df.iloc[-window_len:].copy().reset_index(drop=True)
+                sliding_window = calculate_features(sliding_window)
+                sliding_window = sliding_window.iloc[-window_len:].copy().reset_index(drop=True)
 
-            # 计算训练集上的评价指标
             y_pred = model.predict(X)
             r2 = r2_score(y, y_pred)
             mae = mean_absolute_error(y, y_pred)
             metrics_all.append((name, float(r2), float(mae)))
             preds_all.append(preds)
 
-        # 集成预测取均值
         final_preds = (
             list(map(float, np.mean(preds_all, axis=0)))
             if model_name == "ensemble"
