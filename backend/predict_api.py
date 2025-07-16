@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 import yfinance as yf
 import numpy as np
 import pandas as pd
@@ -57,11 +57,40 @@ def ml_predict(df, days, model_name):
         gb.fit(X, y)
         lin.fit(X, y)
         preds = (rf.predict(X) + gb.predict(X) + lin.predict(X)) / 3
-        return format_output(df, preds, y, days)
+        return format_output(df, preds, y, days, ensemble_mode=True)
 
     model.fit(X, y)
     preds = model.predict(X)
-    return format_output(df, preds, y, days)
+    return format_output(df, preds, y, days, model_name=model.__class__.__name__)
+
+def format_output(df, preds, y, days, model_name="Ensemble", ensemble_mode=False):
+    metrics = {
+        "model": model_name,
+        "r2": float(r2_score(y, preds)),
+        "mae": float(mean_absolute_error(y, preds))
+    }
+
+    if ensemble_mode:
+        model_future = LinearRegression()
+        model_future.fit(df[["Open", "High", "Low", "Close", "Volume"]].values, df["Close"].values)
+    else:
+        # 单模型预测时复用已有模型（这里简化用线性回归）
+        model_future = LinearRegression()
+        model_future.fit(df[["Open", "High", "Low", "Close", "Volume"]].values, df["Close"].values)
+
+    last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1]
+    future = []
+    for _ in range(days):
+        pred = model_future.predict(last_features.reshape(1, -1))[0]
+        future.append(pred)
+        last_features = np.roll(last_features, -1)
+        last_features[-1] = pred
+
+    return {
+        "predictions": future,
+        "metrics": metrics,
+        "advice": generate_advice(future)
+    }
 
 def lstm_predict(df, days):
     scaler = MinMaxScaler()
@@ -102,27 +131,6 @@ def lstm_predict(df, days):
             "mae": float(mean_absolute_error(close_data[look_back:], preds))
         },
         "advice": generate_advice(future_prices)
-    }
-
-def format_output(df, preds, y, days):
-    model = LinearRegression()
-    model.fit(df[["Open", "High", "Low", "Close", "Volume"]].values, df["Close"].values)
-    last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1]
-    future = []
-    for _ in range(days):
-        pred = model.predict(last_features.reshape(1, -1))[0]
-        future.append(pred)
-        last_features = np.roll(last_features, -1)
-        last_features[-1] = pred
-
-    return {
-        "predictions": future,
-        "metrics": {
-            "model": "Ensemble" if isinstance(preds, np.ndarray) else model.__class__.__name__,
-            "r2": float(r2_score(y, preds)),
-            "mae": float(mean_absolute_error(y, preds))
-        },
-        "advice": generate_advice(future)
     }
 
 def generate_advice(preds):
