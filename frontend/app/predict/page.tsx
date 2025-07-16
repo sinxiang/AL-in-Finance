@@ -121,7 +121,10 @@ export default function PredictPage() {
           return { x: d, y: Number(val.toFixed(2)) }
         })
         setPredictions(formattedPreds)
-        setMetrics(predRes.data || null)
+        setMetrics({
+          metrics: predRes.data.metrics,
+          advice: predRes.data.advice,
+        })
       }
     } catch {
       setError("Failed to load data. Please try again.")
@@ -199,13 +202,7 @@ export default function PredictPage() {
               datasets: [
                 {
                   label: "OHLC",
-                  data: candles.map((d) => ({
-                    x: d.x,
-                    o: d.o,
-                    h: d.h,
-                    l: d.l,
-                    c: d.c,
-                  })),
+                  data: candles,
                   borderColor: candles.map((d) =>
                     d.c > d.o ? "#00b386" : d.c < d.o ? "#ff4d4f" : "#999"
                   ),
