@@ -4,7 +4,6 @@ from pydantic import BaseModel
 from typing import Optional
 import yfinance as yf
 import numpy as np
-import pandas as pd
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from xgboost import XGBRegressor
@@ -12,9 +11,10 @@ from sklearn.metrics import r2_score, mean_absolute_error
 
 app = FastAPI()
 
+# CORS 中间件，允许跨域
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # 可根据需要替换为你的前端域名
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -27,124 +27,75 @@ class PredictRequest(BaseModel):
     days: int
     model: Optional[str] = "ensemble"
 
-def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(window=period, min_periods=1).mean()
-    avg_loss = loss.rolling(window=period, min_periods=1).mean()
-    rs = avg_gain / (avg_loss + 1e-10)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50)  # 中性值填充
-
-def calculate_features(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df["MA5"] = df["Close"].rolling(window=5, min_periods=1).mean()
-    df["MA10"] = df["Close"].rolling(window=10, min_periods=1).mean()
-    df["MA20"] = df["Close"].rolling(window=20, min_periods=1).mean()
-    df["RSI14"] = calculate_rsi(df["Close"], 14)
-    # 先后向填充缺失均线数据
-    for col in ["MA5", "MA10", "MA20"]:
-        df[col] = df[col].bfill().ffill()
-    df["RSI14"] = df["RSI14"].fillna(50)
-    return df
-
 @router.post("/predict")
 async def predict_stock(payload: PredictRequest):
     symbol = payload.symbol.upper()
-    days = min(payload.days, 90)  # 限制最大预测天数
+    days = min(payload.days, 90)
     model_name = payload.model or "ensemble"
 
     print(f"[INFO] Predict request: {symbol}, days={days}, model={model_name}")
 
     try:
-        df = yf.download(symbol, period="720d", interval="1d", progress=False, auto_adjust=True)
+        df = yf.download(symbol, period="180d", interval="1d", progress=False)
         if df.empty:
-            raise HTTPException(status_code=400, detail="No data found for the symbol.")
-        if "Close" not in df.columns or df["Close"].isnull().all():
-            raise HTTPException(status_code=400, detail="Missing 'Close' data.")
+            raise HTTPException(status_code=400, detail="No data found.")
 
-        df = calculate_features(df)
+        df.dropna(inplace=True)
         df["Target"] = df["Close"].shift(-1)
+        df.dropna(inplace=True)
 
-        if "Target" not in df.columns:
-            raise HTTPException(status_code=400, detail="Failed to create Target column.")
-
-        df = df.dropna(subset=["Target"])
-
-        features = ["Open", "High", "Low", "Close", "Volume", "MA5", "MA10", "MA20", "RSI14"]
-
-        # 检查所有特征是否存在且无全部为NaN
-        for feature in features:
-            if feature not in df.columns:
-                raise HTTPException(status_code=400, detail=f"Feature '{feature}' not found in data.")
-            if df[feature].isnull().all():
-                raise HTTPException(status_code=400, detail=f"Feature '{feature}' contains all NaN values.")
-
+        features = ["Open", "High", "Low", "Close", "Volume"]
         X = df[features].values
         y = df["Target"].values
 
         models = {
-            "random_forest": RandomForestRegressor(n_estimators=100, random_state=42),
-            "gb": GradientBoostingRegressor(random_state=42),
-            "xgb": XGBRegressor(objective='reg:squarederror', verbosity=0, n_estimators=50, random_state=42),
+            "random_forest": RandomForestRegressor(n_estimators=100),
+            "gb": GradientBoostingRegressor(),
+            "xgb": XGBRegressor(objective='reg:squarederror', verbosity=0, n_estimators=50),
             "linear": LinearRegression(),
         }
 
-        if model_name != "ensemble" and model_name not in models:
-            raise HTTPException(status_code=400, detail=f"Model '{model_name}' not supported.")
-
-        used_models = models if model_name == "ensemble" else {model_name: models[model_name]}
-
-        window_len = 60  # 滑动窗口长度
-
         preds_all = []
         metrics_all = []
+
+        used_models = models if model_name == "ensemble" else {model_name: models[model_name]}
 
         for name, model in used_models.items():
             print(f"[INFO] Training model: {name}")
             model.fit(X, y)
 
-            sliding_window = df.tail(window_len).copy().reset_index(drop=True)
+            recent_X = X[-1:].copy()
             preds = []
 
             for _ in range(days):
-                input_features = sliding_window[features].iloc[-1].values.reshape(1, -1)
-                # 处理可能的 NaN
-                nan_fill_value = np.nanmean(sliding_window[features].values.flatten())
-                input_features = np.nan_to_num(input_features, nan=nan_fill_value)
-
-                pred = model.predict(input_features)[0]
-                preds.append(float(pred))
-
-                new_row_df = pd.DataFrame([{
-                    "Open": float(pred),
-                    "High": float(pred),
-                    "Low": float(pred),
-                    "Close": float(pred),
-                    "Volume": sliding_window["Volume"].iloc[-1],
-                }])
-
-                sliding_window = pd.concat([sliding_window, new_row_df], ignore_index=True)
-                sliding_window = calculate_features(sliding_window)
-                if len(sliding_window) > window_len:
-                    sliding_window = sliding_window.iloc[-window_len:].copy().reset_index(drop=True)
+                pred = model.predict(recent_X)[0]
+                preds.append(pred)
+                new_row = np.array([
+                    pred,
+                    recent_X[0][1],
+                    recent_X[0][2],
+                    recent_X[0][3],
+                    recent_X[0][4],
+                ]).reshape(1, -1)
+                recent_X = new_row
 
             r2 = r2_score(y, model.predict(X))
             mae = mean_absolute_error(y, model.predict(X))
-            metrics_all.append((name, float(r2), float(mae)))
             preds_all.append(preds)
+            metrics_all.append((name, r2, mae))
 
-        if model_name == "ensemble":
-            final_preds = list(map(float, np.mean(preds_all, axis=0)))
-            model_used = "ensemble"
-            model_r2 = float(np.mean([m[1] for m in metrics_all]))
-            model_mae = float(np.mean([m[2] for m in metrics_all]))
-        else:
-            final_preds = list(map(float, preds_all[0]))
-            model_used = list(used_models.keys())[0]
-            model_r2 = metrics_all[0][1]
-            model_mae = metrics_all[0][2]
+        final_preds = (
+            np.mean(preds_all, axis=0).tolist()
+            if model_name == "ensemble"
+            else preds_all[0]
+        )
+
+        # 强制转换为 Python float，避免 JSON 序列化错误
+        final_preds = [float(p) for p in final_preds]
+
+        model_used = "ensemble" if model_name == "ensemble" else list(used_models.keys())[0]
+        model_r2 = float(np.mean([m[1] for m in metrics_all]))
+        model_mae = float(np.mean([m[2] for m in metrics_all]))
 
         trend = "upward" if final_preds[-1] > final_preds[0] else "downward"
         risk = "low" if model_mae < 2 else "high"
@@ -175,6 +126,5 @@ async def predict_stock(payload: PredictRequest):
         print("[ERROR] Exception occurred:")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-
 
 app.include_router(router, prefix="/api")
