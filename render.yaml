@@ -3,7 +3,7 @@ services:
     name: al-in-finance
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PORT
-        value: 10000  # Render 会注入这个，默认不用写
+        value: 10000  # 你也可以不写，让 Render 自动分配
