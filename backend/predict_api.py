@@ -50,47 +50,25 @@ def ml_predict(df, days, model_name):
     elif model_name == "linear":
         model = LinearRegression()
     else:
+        # Ensemble average of RF, GB, Linear
         rf = RandomForestRegressor()
         gb = GradientBoostingRegressor()
         lin = LinearRegression()
+
         rf.fit(X, y)
         gb.fit(X, y)
         lin.fit(X, y)
-        preds = (rf.predict(X) + gb.predict(X) + lin.predict(X)) / 3
-        return format_output(df, preds, y, days, ensemble_mode=True)
+
+        preds_rf = rf.predict(X)
+        preds_gb = gb.predict(X)
+        preds_lin = lin.predict(X)
+        preds = (preds_rf + preds_gb + preds_lin) / 3
+
+        return format_output(df, preds, y, days)
 
     model.fit(X, y)
     preds = model.predict(X)
-    return format_output(df, preds, y, days, model_name=model.__class__.__name__)
-
-def format_output(df, preds, y, days, model_name="Ensemble", ensemble_mode=False):
-    metrics = {
-        "model": model_name,
-        "r2": float(r2_score(y, preds)),
-        "mae": float(mean_absolute_error(y, preds))
-    }
-
-    if ensemble_mode:
-        model_future = LinearRegression()
-        model_future.fit(df[["Open", "High", "Low", "Close", "Volume"]].values, df["Close"].values)
-    else:
-        # 单模型预测时复用已有模型（这里简化用线性回归）
-        model_future = LinearRegression()
-        model_future.fit(df[["Open", "High", "Low", "Close", "Volume"]].values, df["Close"].values)
-
-    last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1]
-    future = []
-    for _ in range(days):
-        pred = model_future.predict(last_features.reshape(1, -1))[0]
-        future.append(pred)
-        last_features = np.roll(last_features, -1)
-        last_features[-1] = pred
-
-    return {
-        "predictions": future,
-        "metrics": metrics,
-        "advice": generate_advice(future)
-    }
+    return format_output(df, preds, y, days)
 
 def lstm_predict(df, days):
     scaler = MinMaxScaler()
@@ -121,16 +99,45 @@ def lstm_predict(df, days):
         future_preds.append(pred[0, 0])
         last_seq = np.append(last_seq[1:], pred, axis=0)
 
-    future_prices = scaler.inverse_transform(np.array(future_preds).reshape(-1, 1)).flatten().tolist()
-    preds = scaler.inverse_transform(model.predict(X, verbose=0)).flatten().tolist()
+    future_prices = scaler.inverse_transform(np.array(future_preds).reshape(-1, 1)).flatten()
+
+    # 预测训练集结果用于计算指标，注意保持 numpy array 类型且长度匹配
+    preds_scaled = model.predict(X, verbose=0).flatten()
+    preds = scaler.inverse_transform(preds_scaled.reshape(-1, 1)).flatten()
+    true_vals = close_data[look_back:].flatten()
+
+    r2 = float(r2_score(true_vals, preds))
+    mae = float(mean_absolute_error(true_vals, preds))
+
     return {
-        "predictions": future_prices,
+        "predictions": future_prices.tolist(),
         "metrics": {
             "model": "LSTM",
-            "r2": float(r2_score(close_data[look_back:], preds)),
-            "mae": float(mean_absolute_error(close_data[look_back:], preds))
+            "r2": r2,
+            "mae": mae
         },
-        "advice": generate_advice(future_prices)
+        "advice": generate_advice(future_prices.tolist())
+    }
+
+def format_output(df, preds, y, days):
+    model = LinearRegression()
+    model.fit(df[["Open", "High", "Low", "Close", "Volume"]].values, df["Close"].values)
+    last_features = df[["Open", "High", "Low", "Close", "Volume"]].values[-1]
+    future = []
+    for _ in range(days):
+        pred = model.predict(last_features.reshape(1, -1))[0]
+        future.append(pred)
+        last_features = np.roll(last_features, -1)
+        last_features[-1] = pred
+
+    return {
+        "predictions": future,
+        "metrics": {
+            "model": "Ensemble" if isinstance(preds, np.ndarray) else model.__class__.__name__,
+            "r2": float(r2_score(y, preds)),
+            "mae": float(mean_absolute_error(y, preds))
+        },
+        "advice": generate_advice(future)
     }
 
 def generate_advice(preds):
