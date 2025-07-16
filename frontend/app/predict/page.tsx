@@ -92,7 +92,7 @@ export default function PredictPage() {
       const [chartRes, predRes] = await Promise.all([
         axios.get(`/api/stock?symbol=${symbol}`),
         showPrediction
-          ? axios.post("https://al-in-finance.onrender.com/api/predict", {
+          ? axios.post("https://al-in-finance-1.onrender.com/api/predict", {
             symbol,
             days,
             model,
