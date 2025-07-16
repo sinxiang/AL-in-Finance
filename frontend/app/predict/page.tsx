@@ -100,9 +100,6 @@ export default function PredictPage() {
           : Promise.resolve({ data: {} }),
       ])
 
-      console.log("Chart Data:", chartRes.data)
-      console.log("Prediction Data:", predRes.data)
-
       const timestamps: number[] = chartRes.data.chart.result[0].timestamp
       const ohlc = chartRes.data.chart.result[0].indicators.quote[0]
 
@@ -126,8 +123,7 @@ export default function PredictPage() {
         setPredictions(formattedPreds)
         setMetrics(predRes.data || null)
       }
-    } catch (err) {
-      console.error("Fetch Error:", err)
+    } catch {
       setError("Failed to load data. Please try again.")
     } finally {
       setLoading(false)
@@ -176,7 +172,6 @@ export default function PredictPage() {
             <ToggleGroupItem value="gb">GB</ToggleGroupItem>
             <ToggleGroupItem value="xgb">XGB</ToggleGroupItem>
             <ToggleGroupItem value="linear">Linear</ToggleGroupItem>
-            <ToggleGroupItem value="lstm">LSTM</ToggleGroupItem>
           </ToggleGroup>
         </div>
         <div className="flex items-center space-x-2">
@@ -248,10 +243,11 @@ export default function PredictPage() {
           <Chart
             type="line"
             data={{
+              labels: predictions.map((d) => d.x),
               datasets: [
                 {
                   label: "Predicted Close",
-                  data: predictions.map((d) => ({ x: d.x, y: d.y })),
+                  data: predictions.map((d) => d.y),
                   borderColor: "green",
                   fill: false,
                 },

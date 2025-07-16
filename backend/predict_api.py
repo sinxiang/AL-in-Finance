@@ -1,21 +1,108 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import List, Optional
 import yfinance as yf
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.linear_model import LinearRegression
+from xgboost import XGBRegressor
+from sklearn.metrics import r2_score, mean_absolute_error
 
 router = APIRouter()
 
 class PredictRequest(BaseModel):
     symbol: str
+    days: int
+    model: Optional[str] = "ensemble"
 
 @router.post("/predict")
-def predict_stock(req: PredictRequest):
+async def predict_stock(payload: PredictRequest):
+    symbol = payload.symbol.upper()
+    days = min(payload.days, 90)  # 限制最大天数
+    model_name = payload.model or "ensemble"
+
+    print(f"[INFO] Predict request: {symbol}, days={days}, model={model_name}")
+
     try:
-        df = yf.download(req.symbol, period="3mo", interval="1d", progress=False)
-        if df.empty or len(df) < 30:
-            return {"message": "Not enough data."}
-        return {
-            "symbol": req.symbol,
-            "history": df["Close"].tail(30).tolist()
+        df = yf.download(symbol, period="180d", interval="1d", progress=False)
+        if df.empty:
+            raise HTTPException(status_code=400, detail="No data found.")
+
+        df.dropna(inplace=True)
+        df["Target"] = df["Close"].shift(-1)
+        df.dropna(inplace=True)
+
+        features = ["Open", "High", "Low", "Close", "Volume"]
+        X = df[features].values
+        y = df["Target"].values
+
+        models = {
+            "random_forest": RandomForestRegressor(n_estimators=100),
+            "gb": GradientBoostingRegressor(),
+            "xgb": XGBRegressor(verbosity=0),
+            "linear": LinearRegression(),
         }
+
+        preds_all = []
+        metrics_all = []
+
+        used_models = models if model_name == "ensemble" else {model_name: models[model_name]}
+
+        for name, model in used_models.items():
+            print(f"[INFO] Training model: {name}")
+            model.fit(X, y)
+
+            # 滑动窗口预测
+            recent_X = X[-1:]
+            preds = []
+            for _ in range(days):
+                pred = model.predict(recent_X)[0]
+                preds.append(pred)
+                new_row = np.append(recent_X[0][1:], pred).reshape(1, -1)
+                recent_X = np.concatenate([recent_X[:, 1:], [[pred]]], axis=1)
+
+            r2 = r2_score(y, model.predict(X))
+            mae = mean_absolute_error(y, model.predict(X))
+            preds_all.append(preds)
+            metrics_all.append((name, r2, mae))
+
+        # 集成：平均值
+        final_preds = (
+            np.mean(preds_all, axis=0).tolist()
+            if model_name == "ensemble"
+            else preds_all[0]
+        )
+
+        # 最优模型评价
+        model_used = "ensemble" if model_name == "ensemble" else list(used_models.keys())[0]
+        model_r2 = np.mean([m[1] for m in metrics_all])
+        model_mae = np.mean([m[2] for m in metrics_all])
+
+        # 建议逻辑
+        trend = "upward" if final_preds[-1] > final_preds[0] else "downward"
+        risk = "low" if model_mae < 2 else "high"
+        suggestion = (
+            "Likely to rise, consider buying."
+            if trend == "upward" and risk == "low"
+            else "Trend uncertain or risk high, be cautious."
+        )
+
+        print("[INFO] Prediction completed.")
+
+        return {
+            "predictions": final_preds,
+            "metrics": {
+                "model": model_used,
+                "r2": round(model_r2, 4),
+                "mae": round(model_mae, 4),
+            },
+            "advice": {
+                "trend": trend,
+                "risk": risk,
+                "suggestion": suggestion,
+            },
+        }
+
     except Exception as e:
-        return {"message": f"Error fetching data: {str(e)}"}
+        print("[ERROR]", str(e))
+        raise HTTPException(status_code=500, detail="Prediction failed.")
