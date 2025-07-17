@@ -135,9 +135,15 @@ export default function PredictPage() {
         <h1 className="text-4xl font-extrabold mb-4 text-center text-teal-900 tracking-wide">
           🔍 Search & 🔮 Predict Stock Data
         </h1>
-        <p className="text-teal-800 mb-10 text-center text-lg leading-relaxed">
+        <p className="text-teal-800 mb-8 text-center text-lg leading-relaxed">
           Enter a stock symbol to view historical data and forecast future prices with different models.
         </p>
+
+        <div className="bg-teal-50 p-4 rounded-xl border border-teal-200 shadow-inner mb-8 text-center text-teal-800 text-base leading-relaxed">
+          ⚠️ The initial loading may take some time — please be patient. <br />
+          ℹ️ To view historical data, simply enter the stock symbol and load the data. <br />
+          If you want predictions, select a model, set the days, and turn on the prediction switch.
+        </div>
 
         <div className="grid md:grid-cols-2 gap-8 mb-10">
           <div>
