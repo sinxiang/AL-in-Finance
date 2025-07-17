@@ -96,7 +96,8 @@ async def predict_stock(payload: PredictRequest):
         X_train = create_sliding_window_features(df_train_scaled, features, window_size)
         y_train = y_train_scaled[window_size:]
 
-        eval_len = 100
+        # 改为评估集长度300天
+        eval_len = 300
         if train_len + eval_len + days > total_len:
             eval_len = total_len - train_len - days
         if eval_len <= 0:
@@ -139,7 +140,6 @@ async def predict_stock(payload: PredictRequest):
 
             preds = []
             for i in range(days):
-                # 取训练集最后 window_size 天向后滑动 i 天
                 start_idx = train_len - window_size + i
                 if start_idx + window_size > total_len:
                     raise HTTPException(status_code=400, detail="Not enough data for independent day prediction.")
@@ -153,14 +153,27 @@ async def predict_stock(payload: PredictRequest):
             preds_all.append(preds)
             metrics_all.append((name, r2, mae))
 
-        if model_name == "ensemble":
-            final_preds = np.mean(preds_all, axis=0).tolist()
-        else:
-            final_preds = preds_all[0]
-
         model_used = "ensemble" if model_name == "ensemble" else list(used_models.keys())[0]
         model_r2 = float(np.mean([m[1] for m in metrics_all]))
         model_mae = float(np.mean([m[2] for m in metrics_all]))
+
+        if model_r2 < 0.2:
+            warning_msg = (
+                f"The stock {symbol} appears difficult to predict with the current model. "
+                "High volatility or noise might be causing poor fit. "
+                "Please interpret the prediction results cautiously."
+            )
+            print("[WARNING] " + warning_msg)
+            return {
+                "warning": warning_msg,
+                "metrics": {
+                    "model": model_used,
+                    "r2": round(model_r2, 4),
+                    "mae": round(model_mae, 4),
+                },
+            }
+
+        final_preds = np.mean(preds_all, axis=0).tolist() if model_name == "ensemble" else preds_all[0]
 
         trend = "upward" if final_preds[-1] > final_preds[0] else "downward"
         risk = "low" if model_mae < 2 else "high"
