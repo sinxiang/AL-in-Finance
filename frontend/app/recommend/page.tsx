@@ -32,20 +32,20 @@ export default function RecommendPage() {
     const current = personalityStocks[selected]
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-100 via-gray-200 to-gray-300 py-16 px-4 md:px-8 flex items-center justify-center">
+        <div className="min-h-screen bg-gradient-to-br from-teal-100 via-cyan-100 to-blue-200 py-16 px-4 md:px-8 flex flex-col items-center justify-center">
             <div className="w-full max-w-3xl bg-white p-10 rounded-3xl shadow-2xl hover:shadow-md transition-all duration-300">
-                <h1 className="text-4xl font-extrabold mb-8 text-center text-gray-800 tracking-wide">
+                <h1 className="text-4xl font-extrabold mb-8 text-center text-teal-900 tracking-wide">
                     🎯 Investment Personality Match
                 </h1>
 
                 <div className="mb-8 text-center">
-                    <label className="block text-xl font-semibold mb-3 text-gray-700">
+                    <label className="block text-xl font-semibold mb-3 text-teal-700">
                         Select Your Investment Personality
                     </label>
                     <select
                         value={selected}
                         onChange={(e) => setSelected(e.target.value as PersonalityType)}
-                        className="w-full md:w-2/3 border-2 border-gray-300 rounded-xl px-4 py-3 text-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition"
+                        className="w-full md:w-2/3 border-2 border-teal-300 rounded-xl px-4 py-3 text-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-green-500 transition"
                     >
                         {Object.keys(personalityStocks).map((type) => (
                             <option key={type} value={type}>
@@ -55,7 +55,7 @@ export default function RecommendPage() {
                     </select>
                 </div>
 
-                <div className="bg-gray-50 p-6 md:p-8 rounded-xl border border-gray-200 shadow-inner transition-all duration-300 hover:scale-[1.02]">
+                <div className="bg-teal-50 p-6 md:p-8 rounded-xl border border-teal-200 shadow-inner transition-all duration-300 hover:scale-[1.02]">
                     <h2 className="text-2xl font-bold text-green-700 mb-4 text-center">
                         📈 Top Stock Picks for {selected}
                     </h2>
@@ -66,21 +66,22 @@ export default function RecommendPage() {
                             </li>
                         ))}
                     </ul>
-                    <p className="text-gray-700 text-lg leading-relaxed whitespace-pre-line text-center">
+                    <p className="text-teal-800 text-lg leading-relaxed whitespace-pre-line text-center">
                         {current.reason}
                     </p>
                 </div>
             </div>
+
+            <div className="text-center mt-8">
+                <a
+                    href="https://al-in-finance.vercel.app/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block bg-cyan-700 text-white px-6 py-3 rounded-full text-lg font-semibold shadow hover:bg-cyan-800 transition"
+                >
+                    🔙 Back to Home
+                </a>
+            </div>
         </div>
     )
 }
-// 与之前相同，只在最下面加上这个：
-<div className="text-center mt-8">
-    <a
-        href="https://al-in-finance.vercel.app/"
-        target="_blank"
-        className="inline-block bg-gray-800 text-white px-6 py-3 rounded-full text-lg font-semibold shadow hover:bg-gray-700 transition"
-    >
-        🔙 Back to Home
-    </a>
-</div>
