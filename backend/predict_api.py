@@ -155,18 +155,22 @@ async def predict_stock(payload: PredictRequest):
                 # Volume保持不变，直接取最后一天的归一化Volume
                 last_volume_scaled = last_day_features[4]
 
-                # 技术指标MA5, MA10, MA20, RSI 用前一天的技术指标值（last_day_features中对应位置）
-                # Open, High, Low, Close 用预测的归一化Close值（pred_scaled）
+                # 递归更新技术指标，用平滑方式更新MA指标，RSI保持不变避免爆炸
+                new_ma5 = (last_day_features[5] * 4 + pred_scaled) / 5
+                new_ma10 = (last_day_features[6] * 9 + pred_scaled) / 10
+                new_ma20 = (last_day_features[7] * 19 + pred_scaled) / 20
+                new_rsi = last_day_features[8]
+
                 new_feat_scaled = np.array([
-                    pred_scaled,        # Open
-                    pred_scaled,        # High
-                    pred_scaled,        # Low
-                    pred_scaled,        # Close
+                    pred_scaled,       # Open
+                    pred_scaled,       # High
+                    pred_scaled,       # Low
+                    pred_scaled,       # Close
                     last_volume_scaled,  # Volume
-                    last_day_features[5],  # MA5
-                    last_day_features[6],  # MA10
-                    last_day_features[7],  # MA20
-                    last_day_features[8],  # RSI
+                    new_ma5,           # MA5
+                    new_ma10,          # MA10
+                    new_ma20,          # MA20
+                    new_rsi,           # RSI
                 ])
 
                 # 滚动窗口左移
