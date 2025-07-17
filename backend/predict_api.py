@@ -96,8 +96,8 @@ async def predict_stock(payload: PredictRequest):
         X_train = create_sliding_window_features(df_train_scaled, features, window_size)
         y_train = y_train_scaled[window_size:]
 
-        # 改为评估集长度300天
-        eval_len = 300
+        # 改为评估集长度150天
+        eval_len = 150
         if train_len + eval_len + days > total_len:
             eval_len = total_len - train_len - days
         if eval_len <= 0:
