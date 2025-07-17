@@ -74,3 +74,13 @@ export default function RecommendPage() {
         </div>
     )
 }
+// 与之前相同，只在最下面加上这个：
+<div className="text-center mt-8">
+    <a
+        href="https://al-in-finance.vercel.app/"
+        target="_blank"
+        className="inline-block bg-gray-800 text-white px-6 py-3 rounded-full text-lg font-semibold shadow hover:bg-gray-700 transition"
+    >
+        🔙 Back to Home
+    </a>
+</div>

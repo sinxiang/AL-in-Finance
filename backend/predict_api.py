@@ -99,9 +99,13 @@ async def predict_stock(payload: PredictRequest):
         X_train = create_sliding_window_features(df_train_scaled, features, window_size)
         y_train = y_train_scaled[window_size:]  # 对应标签滑动窗口后剔除window_size
 
-        eval_len = 252
+        # 改动部分：将评估集长度固定为100天，且保证不会超出数据总长
+        eval_len = 100
         if train_len + eval_len + days > total_len:
             eval_len = total_len - train_len - days
+        if eval_len <= 0:
+            raise HTTPException(status_code=400, detail="Not enough data for evaluation period.")
+
         df_eval = df.iloc[train_len:train_len + eval_len].reset_index(drop=True)
 
         df_eval_scaled = df_eval.copy()

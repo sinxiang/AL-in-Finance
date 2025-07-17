@@ -30,6 +30,8 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 
+import Link from "next/link"
+
 ChartJS.register(
   TimeScale,
   LinearScale,
@@ -132,16 +134,16 @@ export default function PredictPage() {
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <h1 className="text-3xl font-bold mb-4 text-gray-800">
+      <h1 className="text-4xl font-bold mb-4 text-center text-gray-800">
         🔍 Search & 🔮 Predict Stock Data
       </h1>
-      <p className="text-gray-600 mb-6">
-        Enter a stock symbol to view its historical candlestick chart and (optionally) forecast future prices using different models.
+      <p className="text-gray-700 mb-6 text-center text-lg">
+        Enter a stock symbol to view historical data and forecast future prices with different models.
       </p>
 
-      <div className="flex gap-4 flex-wrap mb-6 items-end">
+      <div className="grid md:grid-cols-2 gap-6 mb-6">
         <div>
-          <Label htmlFor="symbol">Symbol</Label>
+          <Label htmlFor="symbol">Stock Symbol</Label>
           <Input
             id="symbol"
             value={symbol}
@@ -149,7 +151,7 @@ export default function PredictPage() {
           />
         </div>
         <div>
-          <Label htmlFor="days">Days to Predict</Label>
+          <Label htmlFor="days">Days to Predict (1-90)</Label>
           <Input
             id="days"
             type="number"
@@ -159,52 +161,55 @@ export default function PredictPage() {
             onChange={(e) => setDays(Number(e.target.value))}
           />
         </div>
-        <div>
-          <Label htmlFor="model">Model</Label>
-          <ToggleGroup
-            type="single"
-            value={model}
-            onValueChange={(val) => val && setModel(val)}
-            className="mt-1"
-          >
-            <ToggleGroupItem value="ensemble">Ensemble</ToggleGroupItem>
-            <ToggleGroupItem value="random_forest">RF</ToggleGroupItem>
-            <ToggleGroupItem value="gb">GB</ToggleGroupItem>
-            <ToggleGroupItem value="xgb">XGB</ToggleGroupItem>
-            <ToggleGroupItem value="linear">Linear</ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-        <div className="flex items-center space-x-2">
-          <Switch
-            checked={showPrediction}
-            onCheckedChange={setShowPrediction}
-            id="show-predict"
-          />
-          <Label htmlFor="show-predict">Show Prediction</Label>
-        </div>
-        <Button onClick={fetchData} disabled={loading}>
-          {loading ? "Loading..." : "Load"}
-        </Button>
       </div>
 
-      {error && <p className="text-red-500">{error}</p>}
+      <div className="bg-gray-100 p-4 rounded-xl border mb-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <Label className="block mb-1 text-lg font-semibold">Prediction Model</Label>
+            <ToggleGroup
+              type="single"
+              value={model}
+              onValueChange={(val) => val && setModel(val)}
+              className="flex flex-wrap gap-2"
+            >
+              <ToggleGroupItem value="ensemble">Ensemble</ToggleGroupItem>
+              <ToggleGroupItem value="random_forest">RF</ToggleGroupItem>
+              <ToggleGroupItem value="gb">GB</ToggleGroupItem>
+              <ToggleGroupItem value="xgb">XGB</ToggleGroupItem>
+              <ToggleGroupItem value="linear">Linear</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Switch
+              checked={showPrediction}
+              onCheckedChange={setShowPrediction}
+              id="show-predict"
+            />
+            <Label htmlFor="show-predict" className="text-lg">
+              Show Prediction
+            </Label>
+          </div>
+
+          <Button onClick={fetchData} disabled={loading} className="mt-2 md:mt-0">
+            {loading ? "Loading..." : "Load Data"}
+          </Button>
+        </div>
+      </div>
+
+      {error && <p className="text-red-500 mb-4">{error}</p>}
 
       {candles.length > 0 && (
         <div className="bg-white p-4 rounded shadow mb-6">
-          <h2 className="text-lg font-medium mb-2">📊 Historical Candlestick</h2>
+          <h2 className="text-xl font-semibold mb-2">📊 Historical Candlestick</h2>
           <Chart
             type="candlestick"
             data={{
               datasets: [
                 {
                   label: "OHLC",
-                  data: candles.map((d) => ({
-                    x: d.x,
-                    o: d.o,
-                    h: d.h,
-                    l: d.l,
-                    c: d.c,
-                  })),
+                  data: candles,
                   borderColor: candles.map((d) =>
                     d.c > d.o ? "#00b386" : d.c < d.o ? "#ff4d4f" : "#999"
                   ),
@@ -218,19 +223,10 @@ export default function PredictPage() {
             }}
             options={{
               responsive: true,
-              plugins: {
-                legend: { display: true },
-                tooltip: { enabled: true },
-              },
+              plugins: { legend: { display: true }, tooltip: { enabled: true } },
               scales: {
-                x: {
-                  type: "time",
-                  time: { unit: "day" },
-                  title: { display: true, text: "Date" },
-                },
-                y: {
-                  title: { display: true, text: "Price (USD)" },
-                },
+                x: { type: "time", time: { unit: "day" }, title: { display: true, text: "Date" } },
+                y: { title: { display: true, text: "Price (USD)" } },
               },
             }}
           />
@@ -238,8 +234,8 @@ export default function PredictPage() {
       )}
 
       {showPrediction && predictions.length > 0 && (
-        <div className="bg-white p-4 rounded shadow">
-          <h2 className="text-lg font-medium mb-2">🔮 Prediction</h2>
+        <div className="bg-white p-4 rounded shadow mb-6">
+          <h2 className="text-xl font-semibold mb-2">🔮 Prediction</h2>
           <Chart
             type="line"
             data={{
@@ -256,14 +252,8 @@ export default function PredictPage() {
             options={{
               responsive: true,
               scales: {
-                x: {
-                  type: "time",
-                  time: { unit: "day" },
-                  title: { display: true, text: "Date" },
-                },
-                y: {
-                  title: { display: true, text: "Price (USD)" },
-                },
+                x: { type: "time", time: { unit: "day" }, title: { display: true, text: "Date" } },
+                y: { title: { display: true, text: "Price (USD)" } },
               },
             }}
           />
@@ -282,6 +272,16 @@ export default function PredictPage() {
           )}
         </div>
       )}
+
+      <div className="text-center mt-6">
+        <Link
+          href="https://al-in-finance.vercel.app/"
+          target="_blank"
+          className="inline-block bg-gray-800 text-white px-6 py-3 rounded-full text-lg font-semibold shadow hover:bg-gray-700 transition"
+        >
+          🔙 Back to Home
+        </Link>
+      </div>
     </div>
   )
 }
