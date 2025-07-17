@@ -9,13 +9,13 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
 from xgboost import XGBRegressor
 from sklearn.metrics import r2_score, mean_absolute_error
-from sklearn.preprocessing import MinMaxScaler  # ✅ 新增导入
+from sklearn.preprocessing import MinMaxScaler
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 可根据需要调整前端域名
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -25,8 +25,8 @@ router = APIRouter()
 
 class PredictRequest(BaseModel):
     symbol: str
-    days: int  # 预测天数，最多90
-    model: Optional[str] = "ensemble"  # 模型选择
+    days: int
+    model: Optional[str] = "ensemble"
 
 def create_sliding_window_features(df: pd.DataFrame, features: list, window_size: int):
     data = df[features].values
@@ -82,24 +82,20 @@ async def predict_stock(payload: PredictRequest):
             train_len = total_len - days - window_size
         df_train = df.iloc[:train_len].reset_index(drop=True)
 
-        # 训练特征归一化
         scaler = MinMaxScaler()
         scaler.fit(df_train[features])
 
         df_train_scaled = df_train.copy()
         df_train_scaled[features] = scaler.transform(df_train[features])
 
-        # 训练标签也归一化（只归一化Close列，目标是Close的下一天，所以标签也要归一化）
         target_scaler = MinMaxScaler()
-        y_train_close = df_train[["Target"]].values  # shape (n,1)
+        y_train_close = df_train[["Target"]].values
         target_scaler.fit(y_train_close)
         y_train_scaled = target_scaler.transform(y_train_close).flatten()
 
-        # 构造训练特征和标签（滑动窗口）
         X_train = create_sliding_window_features(df_train_scaled, features, window_size)
-        y_train = y_train_scaled[window_size:]  # 对应标签滑动窗口后剔除window_size
+        y_train = y_train_scaled[window_size:]
 
-        # 改动部分：将评估集长度固定为100天，且保证不会超出数据总长
         eval_len = 100
         if train_len + eval_len + days > total_len:
             eval_len = total_len - train_len - days
@@ -136,50 +132,23 @@ async def predict_stock(payload: PredictRequest):
             model.fit(X_train, y_train)
 
             y_pred_eval_scaled = model.predict(X_eval)
-            # 评估指标计算时，将预测和真实标签反归一化再评估更合理
             y_pred_eval = target_scaler.inverse_transform(y_pred_eval_scaled.reshape(-1,1)).flatten()
             y_eval_real = target_scaler.inverse_transform(y_eval.reshape(-1,1)).flatten()
             r2 = r2_score(y_eval_real, y_pred_eval)
             mae = mean_absolute_error(y_eval_real, y_pred_eval)
 
             preds = []
-            # 初始输入特征为训练集最后window_size天（归一化）
-            last_days_data = df_train_scaled.iloc[train_len - window_size:train_len][features].values.flatten()
-            input_feat = last_days_data.reshape(1, -1)
-
-            for _ in range(days):
-                pred_scaled = model.predict(input_feat)[0]  # 预测归一化的Target值
-                # 逆归一化成真实股价
+            for i in range(days):
+                # 取训练集最后 window_size 天向后滑动 i 天
+                start_idx = train_len - window_size + i
+                if start_idx + window_size > total_len:
+                    raise HTTPException(status_code=400, detail="Not enough data for independent day prediction.")
+                window_data = df.iloc[start_idx : start_idx + window_size].copy()
+                window_data[features] = scaler.transform(window_data[features])
+                X_input = window_data[features].values.flatten().reshape(1, -1)
+                pred_scaled = model.predict(X_input)[0]
                 pred_real = target_scaler.inverse_transform([[pred_scaled]])[0,0]
                 preds.append(pred_real)
-
-                # 取当前输入特征最后一天的归一化特征（用于保留Volume和计算技术指标）
-                last_day_features = input_feat[0, -len(features):]
-
-                # Volume保持不变，直接取最后一天的归一化Volume
-                last_volume_scaled = last_day_features[4]
-
-                # 递归更新技术指标，用平滑方式更新MA指标，RSI保持不变避免爆炸
-                new_ma5 = (last_day_features[5] * 4 + pred_scaled) / 5
-                new_ma10 = (last_day_features[6] * 9 + pred_scaled) / 10
-                new_ma20 = (last_day_features[7] * 19 + pred_scaled) / 20
-                new_rsi = last_day_features[8]
-
-                new_feat_scaled = np.array([
-                    pred_scaled,       # Open
-                    pred_scaled,       # High
-                    pred_scaled,       # Low
-                    pred_scaled,       # Close
-                    last_volume_scaled,  # Volume
-                    new_ma5,           # MA5
-                    new_ma10,          # MA10
-                    new_ma20,          # MA20
-                    new_rsi,           # RSI
-                ])
-
-                # 滚动窗口左移
-                input_feat = np.roll(input_feat, -len(features))
-                input_feat[0, -len(features):] = new_feat_scaled
 
             preds_all.append(preds)
             metrics_all.append((name, r2, mae))
