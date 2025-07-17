@@ -67,6 +67,7 @@ type MetricInfo = {
     risk: string
     suggestion: string
   }
+  warning?: string
 }
 
 export default function PredictPage() {
@@ -76,6 +77,7 @@ export default function PredictPage() {
   const [showPrediction, setShowPrediction] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [warning, setWarning] = useState("")
   const [candles, setCandles] = useState<CandleDataPoint[]>([])
   const [predictions, setPredictions] = useState<PredictionPoint[]>([])
   const [metrics, setMetrics] = useState<MetricInfo | null>(null)
@@ -83,6 +85,7 @@ export default function PredictPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     setError("")
+    setWarning("")
     setMetrics(null)
     setCandles([])
     setPredictions([])
@@ -99,6 +102,11 @@ export default function PredictPage() {
           : Promise.resolve({ data: {} }),
       ])
 
+      if (!chartRes.data?.chart?.result || chartRes.data.chart.result.length === 0) {
+        setError("No data found for this stock symbol.")
+        return
+      }
+
       const timestamps: number[] = chartRes.data.chart.result[0].timestamp
       const ohlc = chartRes.data.chart.result[0].indicators.quote[0]
 
@@ -111,16 +119,21 @@ export default function PredictPage() {
       }))
       setCandles(formattedCandles)
 
-      if (showPrediction && predRes.data?.predictions) {
-        const lastDate = formattedCandles[formattedCandles.length - 1].x
-        const preds: number[] = predRes.data.predictions
-        const formattedPreds = preds.map((val, i) => {
-          const d = new Date(lastDate)
-          d.setDate(d.getDate() + i + 1)
-          return { x: d, y: Number(val.toFixed(2)) }
-        })
-        setPredictions(formattedPreds)
-        setMetrics(predRes.data || null)
+      if (showPrediction) {
+        if (predRes.data?.predictions) {
+          const lastDate = formattedCandles[formattedCandles.length - 1].x
+          const preds: number[] = predRes.data.predictions
+          const formattedPreds = preds.map((val, i) => {
+            const d = new Date(lastDate)
+            d.setDate(d.getDate() + i + 1)
+            return { x: d, y: Number(val.toFixed(2)) }
+          })
+          setPredictions(formattedPreds)
+          setMetrics(predRes.data || null)
+        } else if (predRes.data?.warning) {
+          setWarning(predRes.data.warning)
+          setMetrics(predRes.data || null)
+        }
       }
     } catch {
       setError("Failed to load data. Please try again.")
@@ -216,6 +229,12 @@ export default function PredictPage() {
         </div>
 
         {error && <p className="text-red-500 mb-6">{error}</p>}
+
+        {warning && (
+          <div className="bg-yellow-100 text-yellow-800 p-4 rounded mb-6 text-center text-lg">
+            ⚠️ {warning}
+          </div>
+        )}
 
         {candles.length > 0 && (
           <div className="bg-white p-6 rounded-2xl shadow mb-8">
